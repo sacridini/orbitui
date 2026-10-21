@@ -89,6 +89,7 @@ Press `e` inside the app to change the area of interest and `?` for all keys.
 | `e` | set the area of interest |
 | `i` / `D` | add a satellite / remove the selected one |
 | `x` | export the agenda as CSV and iCalendar |
+| `P` | download ESA acquisition plans (Sentinel-1/2) |
 | `r` | download fresh elements |
 
 ### Terminals
@@ -120,7 +121,24 @@ blocks and 16 colours. Force a mode with `--marker braille|halfblock|dot` and
 
 Opportunities are geometric. Whether a mission actually acquires depends on its
 observation plan (Sentinel-2 images land only, Landsat follows the WRS-2
-schedule, Sentinel-1 alternates modes) and on clouds.
+schedule, Sentinel-1 alternates modes) and on clouds. For Sentinel-1 and
+Sentinel-2, orbitui reads ESA's plans (below).
+
+### Acquisition plans
+
+ESA publishes the segments Sentinel-1 and Sentinel-2 will acquire over the
+next weeks as KML files. With them, the agenda's `PLAN` column marks each
+overflight `✓` (with the mode: IW, EW, NOBS…) when a recording segment covers
+the AOI at that time, `✗` when the plan covers the date but not the AOI
+(drawn `░` on the timeline), and nothing outside the loaded plans.
+
+The terminal version downloads the plans in effect from the Sentinel pages on
+start (at most every 12 hours, when the cached ones do not cover the
+forecast) and with `P`; `--plan file.kml` loads a local one. ESA does not
+allow cross-origin downloads, so on the web you download the KML from
+[Sentinel-1](https://sentinels.copernicus.eu/web/sentinel/copernicus/sentinel-1/acquisition-plans)
+or [Sentinel-2](https://sentinels.copernicus.eu/web/sentinel/copernicus/sentinel-2/acquisition-plans)
+and drop it on the page (keep ESA's file name: it tells which satellite).
 
 ## Satellites
 
@@ -185,10 +203,12 @@ color = "#ff8800"       # or a colour name
 - Coastlines: [Natural Earth](https://www.naturalearthdata.com) 1:110m and
   1:50m, public domain, converted by `tools/build_coastlines.py`.
 - Orbital elements: Celestrak GP data.
+- Acquisition plans: ESA, Copernicus Sentinel missions.
 - Cloud forecast: weather data by [Open-Meteo.com](https://open-meteo.com)
   (CC BY 4.0).
 
 ## Ideas
 
-- mission acquisition plans (Sentinel-2/1 KML, Landsat WRS-2)
+- Landsat acquisition schedules (WRS-2 path/row)
+- revisit statistics per mission over the AOI
 - mouse: drag to rotate, click to select

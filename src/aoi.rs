@@ -67,20 +67,8 @@ impl Area {
         Ok(area)
     }
 
-    /// Even-odd point in polygon, in lat/lon.
     pub fn contains(&self, lat: f64, lon: f64) -> bool {
-        let mut inside = false;
-        for ring in &self.rings {
-            let mut j = ring.len() - 1;
-            for i in 0..ring.len() {
-                let ((ya, xa), (yb, xb)) = (ring[i], ring[j]);
-                if (ya > lat) != (yb > lat) && lon < (xb - xa) * (lat - ya) / (yb - ya) + xa {
-                    inside = !inside;
-                }
-                j = i;
-            }
-        }
-        inside
+        in_rings(&self.rings, lat, lon)
     }
 
     /// Share of the area inside the swath of a satellite at (lat, lon)
@@ -106,6 +94,22 @@ impl Area {
             .collect();
         serde_json::json!({ "type": "MultiPolygon", "coordinates": polys }).to_string()
     }
+}
+
+/// Even-odd point in polygon, in lat/lon; holes are rings too.
+pub fn in_rings(rings: &[Vec<(f64, f64)>], lat: f64, lon: f64) -> bool {
+    let mut inside = false;
+    for ring in rings {
+        let mut j = ring.len() - 1;
+        for i in 0..ring.len() {
+            let ((ya, xa), (yb, xb)) = (ring[i], ring[j]);
+            if (ya > lat) != (yb > lat) && lon < (xb - xa) * (lat - ya) / (yb - ya) + xa {
+                inside = !inside;
+            }
+            j = i;
+        }
+    }
+    inside
 }
 
 /// Signed distance (km) of a point from the great circle through (lat, lon)

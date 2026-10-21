@@ -3,7 +3,7 @@
 //! The URL can set the area of interest and the opening screen, so that a
 //! forecast can be shared: `?lat=-3.10&lon=-60.02&name=Manaus&view=agenda`
 //! (also `map=1`, `days=7` and `geojson=<url>`). GeoJSON files dropped on
-//! the page become the area of interest.
+//! the page become the area of interest; ESA plan KML files are loaded.
 
 use orbitui::app::{App, KeyCode, KeyEvent, Settings, View};
 use orbitui::orbit::Observer;
@@ -89,7 +89,8 @@ fn convert(key: ratzilla::event::KeyEvent) -> Option<KeyEvent> {
     Some(KeyEvent { code, ctrl: key.ctrl })
 }
 
-/// Files dropped on the page: GeoJSON becomes the area of interest.
+/// Files dropped on the page: GeoJSON becomes the area of interest, KML
+/// is read as an ESA acquisition plan.
 fn accept_dropped_files(app: &Rc<RefCell<App>>) {
     let Some(window) = web_sys::window() else { return };
     let over = Closure::<dyn FnMut(web_sys::DragEvent)>::new(|e: web_sys::DragEvent| e.prevent_default());
@@ -108,7 +109,12 @@ fn accept_dropped_files(app: &Rc<RefCell<App>>) {
                 let Ok(text) = wasm_bindgen_futures::JsFuture::from(file.text()).await else { return };
                 let text = text.as_string().unwrap_or_default();
                 let mut app = app.borrow_mut();
-                if let Err(e) = app.set_geojson(&text, &config::file_stem(&name)) {
+                let loaded = if name.to_lowercase().ends_with(".kml") {
+                    app.load_plan(&name, &text)
+                } else {
+                    app.set_geojson(&text, &config::file_stem(&name))
+                };
+                if let Err(e) = loaded {
                     app.set_status(format!("{name}: {e}"));
                 }
             });

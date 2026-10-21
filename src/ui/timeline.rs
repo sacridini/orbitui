@@ -56,6 +56,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &App, theme: &Theme, selected: Opt
         Span::styled(" image ", Style::new().fg(theme.dim)),
         Span::styled("▒", Style::new().fg(theme.dim)),
         Span::styled(" night ", Style::new().fg(theme.dim)),
+        Span::styled("░", Style::new().fg(theme.good)),
+        Span::styled(" unplanned ", Style::new().fg(theme.dim)),
         Span::styled("▁", Style::new().fg(theme.text)),
         Span::styled(" pass ", Style::new().fg(theme.dim)),
         Span::styled("│", Style::new().fg(theme.now)),
@@ -168,7 +170,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &App, theme: &Theme, selected: Opt
                 if !usable && !app.show_night {
                     continue;
                 }
-                let mut cell = if usable { ('█', Style::new().fg(info.color)) } else { ('▒', Style::new().fg(theme.dim)) };
+                let planned = !matches!(app.plan_status(a), crate::plan::Status::NotPlanned);
+                let mut cell = match (usable, planned) {
+                    (true, true) => ('█', Style::new().fg(info.color)),
+                    (true, false) => ('░', Style::new().fg(info.color)),
+                    _ => ('▒', Style::new().fg(theme.dim)),
+                };
                 if selected == Some((i, a.time)) {
                     cell = ('█', Style::new().fg(theme.aoi).add_modifier(Modifier::BOLD));
                 }

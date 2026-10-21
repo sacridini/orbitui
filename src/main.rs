@@ -55,6 +55,9 @@ struct Cli {
     /// Download fresh elements into the cache, print a summary and exit
     #[arg(long, conflicts_with = "offline")]
     fetch: bool,
+    /// Load an ESA acquisition plan (KML); repeat for several
+    #[arg(long, value_name = "FILE")]
+    plan: Vec<String>,
     /// Write the imaging opportunities as CSV to this file ("-" for stdout) and exit
     #[arg(long, value_name = "FILE")]
     csv: Option<String>,
@@ -123,6 +126,10 @@ fn main() -> Result<()> {
     let settings = Settings { days: cli.days, min_el: cli.min_elev, offline };
     let mut app = App::new(observer, settings, marker, compat);
     app.globe.flat = cli.map;
+    for path in &cli.plan {
+        let text = platform::read_file(path).map_err(anyhow::Error::msg)?;
+        app.load_plan(path, &text).map_err(anyhow::Error::msg)?;
+    }
     if let Some(path) = &cli.aoi {
         let text = platform::read_file(path).map_err(anyhow::Error::msg)?;
         let name = cli.name.clone().unwrap_or_else(|| config::file_stem(path));
@@ -281,14 +288,17 @@ fn print_forecast(app: &mut App) {
     println!("# {} ({}), from {} UTC", app.observer.name, app.observer.coords(), now.format("%Y-%m-%d %H:%M"));
     println!("
 # imaging opportunities");
-    println!("{:<12} {:<19} {:>4} {:>9} {:>8} {:>6} {:>6} {:>6}", "satellite", "time_utc", "dir", "xtrack_km", "offnadir", "sun_el", "cover", "cloud");
+    println!(
+        "{:<12} {:<19} {:>4} {:>9} {:>8} {:>6} {:>6} {:>6}  plan",
+        "satellite", "time_utc", "dir", "xtrack_km", "offnadir", "sun_el", "cover", "cloud"
+    );
     for a in fc.acquisitions.iter().filter(|a| a.time >= now) {
         let sat = &app.sats[a.sat];
         if !a.usable(sat.info.kind) {
             continue;
         }
         println!(
-            "{:<12} {:<19} {:>4} {:>9.1} {:>8.1} {:>6.1} {:>5.0}% {:>6}",
+            "{:<12} {:<19} {:>4} {:>9.1} {:>8.1} {:>6.1} {:>5.0}% {:>6}  {}",
             sat.info.name,
             a.time.format("%Y-%m-%d %H:%M:%S"),
             if a.ascending { "asc" } else { "desc" },
@@ -296,7 +306,8 @@ fn print_forecast(app: &mut App) {
             a.off_nadir,
             a.sun_el,
             a.coverage * 100.0,
-            app.cloud_at(a.time).map_or("-".to_string(), |c| format!("{c:.0}%"))
+            app.cloud_at(a.time).map_or("-".to_string(), |c| format!("{c:.0}%")),
+            app.plan_label(a)
         );
     }
     println!("

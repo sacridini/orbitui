@@ -7,6 +7,7 @@ use crate::coast::World;
 use crate::export;
 use crate::config;
 use crate::orbit::{Observer, Sat};
+use crate::plan::{self, Plans};
 use crate::platform;
 use crate::predict::{self, Acquisition, Forecast, Pass};
 use crate::tle::{self, Raw, Source, TleSet};
@@ -18,6 +19,9 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use web_time::Instant;
 
+/// When the plan pages were last read.
+const PLANS_CHECKED: &str = "cache/plans-checked.txt";
+
 pub enum Msg {
     Forecast { job: u64, forecast: Forecast },
     /// One Celestrak response of the download in progress.
@@ -26,6 +30,10 @@ pub enum Msg {
     GeoJson(Result<String, String>),
     /// The cloud forecast for the AOI at these coordinates.
     Clouds(Result<String, String>, (f64, f64)),
+    /// A Sentinel page listing acquisition plans.
+    PlanPage(Result<String, String>),
+    /// An acquisition plan (KML) and its file name.
+    PlanFile(Result<String, String>, String),
 }
 
 /// Keys, independent of the terminal or browser that produced them.
@@ -224,6 +232,10 @@ pub struct App {
     pub catalog: Vec<SatInfo>,
     tle_fetch: Option<TleFetch>,
     pub clouds: Option<Clouds>,
+    pub plans: Plans,
+    /// Plan downloads in flight: pages, then files.
+    plan_pending: usize,
+    plan_links: Vec<plan::Link>,
     /// Coordinates of the cloud forecast being downloaded.
     clouds_pending: Option<(f64, f64)>,
     /// The elements in use, to rebuild the fleet when the catalog changes.
@@ -271,6 +283,9 @@ impl App {
             tle_fetch: None,
             clouds: None,
             clouds_pending: None,
+            plans: Plans::default(),
+            plan_pending: 0,
+            plan_links: Vec::new(),
             slices: None,
             globe: Globe { center: Center::Aoi, lat: observer.lat, lon: observer.lon, zoom: 1.0, spin: false, flat: false },
             observer,
@@ -307,6 +322,13 @@ impl App {
         };
         if let Some(e) = catalog_error {
             app.set_status(e);
+        }
+        app.load_cached_plans();
+        let checked = platform::load(PLANS_CHECKED)
+            .and_then(|t| DateTime::parse_from_rfc3339(t.trim()).ok())
+            .is_some_and(|t| Utc::now() - t.with_timezone(&Utc) < Duration::hours(12));
+        if !app.settings.offline && platform::THREADS && !checked && app.plans_missing() {
+            app.fetch_plans();
         }
         if set.is_stale() && !app.settings.offline {
             app.refresh_tle();
@@ -404,13 +426,100 @@ impl App {
     }
 
     /// Whether the mission plans the acquisition, when a plan is loaded.
-    pub fn plan_label(&self, _a: &Acquisition) -> String {
-        String::new()
+    pub fn plan_label(&self, a: &Acquisition) -> String {
+        match self.plan_status(a) {
+            plan::Status::Planned(mode) => format!("planned {mode}").trim_end().to_string(),
+            plan::Status::NotPlanned => "not planned".into(),
+            plan::Status::Unknown => String::new(),
+        }
     }
 
     /// Downloads are in flight.
     pub fn busy(&self) -> bool {
-        self.refreshing || self.clouds_pending.is_some()
+        self.refreshing || self.clouds_pending.is_some() || self.plan_pending > 0
+    }
+
+    /// Catalog satellites ESA publishes plans for.
+    fn planned_sats(&self) -> Vec<&'static str> {
+        self.catalog.iter().map(|s| s.short).filter(|s| plan::SATELLITES.contains(s)).collect()
+    }
+
+    /// Some planned satellite has no plan for the forecast window.
+    fn plans_missing(&self) -> bool {
+        let now = self.clock.now();
+        let end = now + Duration::seconds((self.settings.days * 86_400.0) as i64);
+        self.planned_sats().iter().any(|s| !self.plans.covers(s, now, end))
+    }
+
+    /// Loads an acquisition plan (ESA KML).
+    pub fn load_plan(&mut self, name: &str, text: &str) -> Result<(), String> {
+        let file = plan::parse_kml(text, name)?;
+        self.set_status(format!(
+            "Plan of {} loaded: {} segments, {} to {}",
+            file.sat,
+            file.segments.len(),
+            file.start.format("%d %b"),
+            file.end.format("%d %b")
+        ));
+        self.plans.add(file);
+        Ok(())
+    }
+
+    fn load_cached_plans(&mut self) {
+        let now = self.clock.now();
+        for (name, text) in platform::load_dir("cache/plans/") {
+            match plan::parse_kml(&text, name.trim_end_matches(".kml")) {
+                Ok(file) if file.end >= now => self.plans.add(file),
+                // Expired or unreadable: forget it.
+                _ => platform::remove(&format!("cache/plans/{name}")),
+            }
+        }
+    }
+
+    /// Downloads the plans in effect from the Sentinel pages.
+    pub fn fetch_plans(&mut self) {
+        if !platform::THREADS {
+            self.set_status("ESA blocks downloads from web pages: drop plan KML files from sentinels.copernicus.eu here");
+            return;
+        }
+        if self.plan_pending > 0 || self.settings.offline {
+            return;
+        }
+        self.plan_links.clear();
+        self.plan_pending = plan::PAGES.len();
+        platform::save(PLANS_CHECKED, &Utc::now().to_rfc3339());
+        for page in plan::PAGES {
+            self.get(page.to_string(), Msg::PlanPage);
+        }
+    }
+
+    fn fetch_plan_files(&mut self) {
+        let sats = self.planned_sats();
+        let now = self.clock.now();
+        let until = now + Duration::seconds((self.settings.days * 86_400.0) as i64);
+        let picked = plan::pick(&self.plan_links, now, until, &sats);
+        let wanted: Vec<plan::Link> = picked.into_iter().filter(|l| !self.plans.files.iter().any(|f| f.name == l.name)).collect();
+        if wanted.is_empty() {
+            return;
+        }
+        self.set_status(format!("Downloading {} acquisition plans from ESA…", wanted.len()));
+        self.plan_pending = wanted.len();
+        for link in wanted {
+            let tx = self.tx.clone();
+            let name = link.name.clone();
+            platform::get(link.url, move |body| {
+                tx.send(Msg::PlanFile(body, name)).ok();
+            });
+        }
+    }
+
+    /// The plan's verdict on an acquisition.
+    pub fn plan_status(&self, a: &Acquisition) -> plan::Status {
+        let sat = self.sats[a.sat].info.short;
+        match &self.observer.area {
+            Some(area) => self.plans.status(sat, a.time, &area.samples),
+            None => self.plans.status(sat, a.time, &[(self.observer.lat, self.observer.lon)]),
+        }
     }
 
     /// Keeps the cloud forecast for the AOI current.
@@ -594,6 +703,31 @@ impl App {
                     }
                 }
                 Msg::Clouds(..) => {}
+                Msg::PlanPage(body) => {
+                    self.plan_pending = self.plan_pending.saturating_sub(1);
+                    if let Ok(page) = body {
+                        self.plan_links.extend(plan::links(&page));
+                    }
+                    if self.plan_pending == 0 {
+                        self.fetch_plan_files();
+                    }
+                }
+                Msg::PlanFile(body, name) => {
+                    self.plan_pending = self.plan_pending.saturating_sub(1);
+                    match body.and_then(|text| {
+                        let loaded = self.load_plan(&name, &text);
+                        if loaded.is_ok() {
+                            platform::save(&format!("cache/plans/{name}.kml"), &text);
+                        }
+                        loaded
+                    }) {
+                        Ok(()) => {}
+                        Err(e) => self.set_status(format!("Acquisition plan {name}: {e}")),
+                    }
+                    if self.plan_pending == 0 {
+                        self.set_status(format!("{} acquisition plans loaded from ESA", self.plans.files.len()));
+                    }
+                }
             }
         }
 
@@ -863,6 +997,7 @@ impl App {
                 self.prompt = Some(Prompt { kind: PromptKind::Aoi, text });
             }
             KeyCode::Char('x') => self.export(),
+            KeyCode::Char('P') => self.fetch_plans(),
             KeyCode::Char('i') => self.prompt = Some(Prompt { kind: PromptKind::AddSatellite, text: String::new() }),
             KeyCode::Char('D') => self.remove_selected(),
             KeyCode::Char('r') => {

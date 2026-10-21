@@ -13,6 +13,7 @@ pub mod coast;
 pub mod export;
 pub mod config;
 pub mod orbit;
+pub mod plan;
 pub mod platform;
 pub mod predict;
 pub mod tle;

@@ -9,6 +9,7 @@ mod timeline;
 use crate::app::{App, Event, EventList, PromptKind, View};
 use crate::catalog::Kind;
 use crate::orbit::format_coords;
+use crate::plan;
 use crate::predict::Light;
 use crate::tle::Source;
 use chrono::{DateTime, Duration, Local, Utc};
@@ -374,7 +375,7 @@ fn draw_agenda(f: &mut Frame, area: Rect, app: &mut App, theme: &Theme) {
         let events = app.events();
         let idx = app.selected_event_index(&events);
         let ev = idx.map(|i| events[i]);
-        (idx, ev.map(|e| (e.sat(), e.time())), ev.map(|e| owned(&e, app.observer.lon)))
+        (idx, ev.map(|e| (e.sat(), e.time())), ev.map(|e| owned(&e, app)))
     };
     app.event_table.select(idx);
     timeline::render(f, tl_area, app, theme, selected_key);
@@ -401,9 +402,12 @@ struct Selected {
     to: DateTime<Utc>,
     lines: Vec<(String, String)>,
     light: Option<Light>,
+    /// Shown for missions that publish plans.
+    plan: Option<plan::Status>,
 }
 
-fn owned(e: &Event, app_lon: f64) -> Selected {
+fn owned(e: &Event, app: &App) -> Selected {
+    let app_lon = app.observer.lon;
     match e {
         Event::Acq(a) => Selected {
             sat: a.sat,
@@ -420,6 +424,7 @@ fn owned(e: &Event, app_lon: f64) -> Selected {
                 ("sun".into(), format!("{:.1}° elevation", a.sun_el)),
             ],
             light: Some(a.light()),
+            plan: plan::SATELLITES.contains(&app.sats[a.sat].info.short).then(|| app.plan_status(a)),
         },
         Event::Pass(p) => Selected {
             sat: p.sat,
@@ -433,6 +438,7 @@ fn owned(e: &Event, app_lon: f64) -> Selected {
                 ("duration".into(), format!("{}m {:02}s", (p.los - p.aos).num_minutes(), (p.los - p.aos).num_seconds() % 60)),
             ],
             light: None,
+            plan: None,
         },
     }
 }
@@ -442,6 +448,17 @@ fn solar_time(t: DateTime<Utc>, lon: f64) -> String {
     let hours = (t.timestamp() as f64 / 3600.0 + lon / 15.0).rem_euclid(24.0);
     let minutes = (hours * 60.0).round() as i64 % 1440;
     format!("{:02}:{:02} at AOI", minutes / 60, minutes % 60)
+}
+
+fn plan_span(status: &plan::Status, theme: &Theme) -> Span<'static> {
+    match status {
+        plan::Status::Planned(mode) => {
+            let mode: String = mode.split_whitespace().next().unwrap_or("").chars().take(5).collect();
+            Span::styled(format!("✓ {mode}"), Style::new().fg(theme.good))
+        }
+        plan::Status::NotPlanned => Span::styled("✗", Style::new().fg(theme.bad)),
+        plan::Status::Unknown => Span::styled("", Style::new()),
+    }
 }
 
 fn cloud_span(cloud: Option<f64>, kind: Kind, theme: &Theme) -> Span<'static> {
@@ -508,6 +525,9 @@ fn draw_events(f: &mut Frame, area: Rect, app: &mut App, theme: &Theme) {
                         if app.clouds.is_some() {
                             cells.push(Cell::from(cloud_span(app.cloud_at(a.time), kind, theme)));
                         }
+                        if !app.plans.files.is_empty() {
+                            cells.push(Cell::from(plan_span(&app.plan_status(a), theme)));
+                        }
                         Row::new(cells)
                     }
                     Event::Pass(p) => Row::new(vec![
@@ -532,6 +552,9 @@ fn draw_events(f: &mut Frame, area: Rect, app: &mut App, theme: &Theme) {
                 }
                 if app.clouds.is_some() {
                     columns.push(("CLOUD", 5));
+                }
+                if !app.plans.files.is_empty() {
+                    columns.push(("PLAN", 8));
                 }
                 columns.into_iter().map(|(h, w)| (h, Constraint::Length(w))).unzip()
             }
@@ -585,6 +608,16 @@ fn draw_event_info(f: &mut Frame, area: Rect, app: &App, theme: &Theme, ev: &Sel
     ];
     for (k, v) in &ev.lines {
         lines.push(Line::from(kv(k, v.clone(), theme)));
+    }
+    if let Some(status) = &ev.plan {
+        let (text, color) = match status {
+            plan::Status::Planned(mode) => (format!("✓ in the ESA plan ({mode})"), theme.good),
+            plan::Status::NotPlanned => ("✗ not in the ESA plan".to_string(), theme.bad),
+            plan::Status::Unknown => ("no plan loaded for this date".to_string(), theme.dim),
+        };
+        let mut line = kv("plan", "", theme);
+        line.push(Span::styled(text, Style::new().fg(color)));
+        lines.push(Line::from(line));
     }
     if ev.light.is_some()
         && let Some(v) = app.cloud_at(ev.time)
@@ -667,6 +700,7 @@ fn draw_help(f: &mut Frame, app: &App, theme: &Theme) {
         ("e", "set the area of interest"),
         ("i", "add a satellite by NORAD id"),
         ("x", "export the agenda as CSV and iCalendar"),
+        ("P", "download ESA acquisition plans (Sentinel-1/2)"),
         ("D", "remove the selected satellite"),
         ("r", "download fresh elements"),
         ("q  esc", "quit"),

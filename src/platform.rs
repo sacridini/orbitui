@@ -48,7 +48,29 @@ mod imp {
     }
 
     pub fn read_file(path: &str) -> Result<String, String> {
-        std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))
+        // ESA plans declare Latin-1; their content is ASCII.
+        std::fs::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).map_err(|e| format!("{path}: {e}"))
+    }
+
+    /// Files stored under a key prefix such as `cache/plans/`, as (name, text).
+    pub fn load_dir(prefix: &str) -> Vec<(String, String)> {
+        let Some(dir) = location(&format!("{prefix}x")).and_then(|p| p.parent().map(|d| d.to_path_buf())) else {
+            return Vec::new();
+        };
+        let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+        entries
+            .flatten()
+            .filter_map(|e| {
+                let text = std::fs::read(e.path()).ok()?;
+                Some((e.file_name().to_string_lossy().into_owned(), String::from_utf8_lossy(&text).into_owned()))
+            })
+            .collect()
+    }
+
+    pub fn remove(key: &str) {
+        if let Some(path) = location(key) {
+            std::fs::remove_file(path).ok();
+        }
     }
 
     /// Writes a file for the user in the working directory.
@@ -109,6 +131,17 @@ mod imp {
 
     pub fn read_file(_path: &str) -> Result<String, String> {
         Err("drop the GeoJSON file on the page instead".into())
+    }
+
+    /// Plans are too large for the browser's storage: nothing is kept.
+    pub fn load_dir(_prefix: &str) -> Vec<(String, String)> {
+        Vec::new()
+    }
+
+    pub fn remove(key: &str) {
+        if let Some(s) = storage() {
+            s.remove_item(&format!("orbitui.{key}")).ok();
+        }
     }
 
     /// Hands a file to the user as a browser download.
