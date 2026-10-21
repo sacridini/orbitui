@@ -38,13 +38,14 @@ cargo install --git https://github.com/sacridini/orbitui
 Or open the web version, the same app compiled to WebAssembly:
 <https://sacridini.github.io/orbitui/>. The URL takes the area of interest
 and the opening screen, so a forecast can be shared:
-<https://sacridini.github.io/orbitui/?lat=-3.10&lon=-60.02&name=Manaus&view=agenda>
-(also `map=1`, `days=7` and `geojson=<url>`).
+<https://sacridini.github.io/orbitui/?place=Berlim&view=agenda> or
+`?lat=-3.10&lon=-60.02&name=Manaus` (also `map=1`, `days=7` and `geojson=<url>`).
 
 ## Use
 
 ```sh
-orbitui --lat -3.10 --lon -60.02 --name Manaus # remembered for the next runs
+orbitui --place Berlim                         # by name; remembered for the next runs
+orbitui --lat -3.10 --lon -60.02 --name Manaus # or by coordinates
 orbitui                                        # last AOI (Brasília by default)
 orbitui --days 10 --map                        # longer forecast, start on the map
 orbitui --time 2027-01-15T12:00:00Z            # plan for another date
@@ -71,7 +72,12 @@ the web, drop the file on the page or pass `?geojson=<url>`, e.g. a Brazilian
 state from IBGE:
 <https://sacridini.github.io/orbitui/?geojson=https%3A%2F%2Fservicodados.ibge.gov.br%2Fapi%2Fv3%2Fmalhas%2Festados%2F53%3Fformato%3Dapplication%2Fvnd.geo%252Bjson>
 
-Press `e` inside the app to change the area of interest and `?` for all keys.
+Press `e` inside the app to change the area of interest: type a place name
+(`Berlim`, `Berlin`, `Pequim`, `São Paulo`), coordinates, or a GeoJSON file or
+URL. A name with several matches opens a list to choose from, most populous
+first. Names are looked up in the
+[Open-Meteo geocoding API](https://open-meteo.com/en/docs/geocoding-api)
+(GeoNames) in your language and a few common ones. `?` lists all keys.
 
 | Key | Action |
 | --- | --- |
@@ -204,8 +210,8 @@ color = "#ff8800"       # or a colour name
   1:50m, public domain, converted by `tools/build_coastlines.py`.
 - Orbital elements: Celestrak GP data.
 - Acquisition plans: ESA, Copernicus Sentinel missions.
-- Cloud forecast: weather data by [Open-Meteo.com](https://open-meteo.com)
-  (CC BY 4.0).
+- Cloud forecast and place names: [Open-Meteo.com](https://open-meteo.com)
+  (CC BY 4.0), with [GeoNames](https://www.geonames.org) for places.
 
 ## Ideas
 

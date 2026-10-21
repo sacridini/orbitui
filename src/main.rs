@@ -31,6 +31,9 @@ struct Cli {
     /// Longitude of the area of interest in degrees (west is negative)
     #[arg(long, allow_negative_numbers = true, requires = "lat")]
     lon: Option<f64>,
+    /// Area of interest by place name ("Berlim", "Manaus"); the best match is taken
+    #[arg(long, conflicts_with_all = ["lat", "lon", "aoi"])]
+    place: Option<String>,
     /// Area of interest from a GeoJSON file (polygons, or a point)
     #[arg(long, conflicts_with_all = ["lat", "lon"])]
     aoi: Option<String>,
@@ -82,7 +85,7 @@ struct Cli {
     /// Screen for --render: monitor or agenda
     #[arg(long, hide = true, default_value = "monitor")]
     view: String,
-    /// Keys typed before --render draws (\n enter, \e esc, \d down, \u up)
+    /// Keys typed before --render draws (\n enter, \e esc, \d down, \u up, \b backspace)
     #[arg(long, hide = true, default_value = "")]
     keys: String,
 }
@@ -126,6 +129,15 @@ fn main() -> Result<()> {
     let settings = Settings { days: cli.days, min_el: cli.min_elev, offline };
     let mut app = App::new(observer, settings, marker, compat);
     app.globe.flat = cli.map;
+    if let Some(name) = &cli.place {
+        let before = app.observer.coords();
+        app.search_place(name, true);
+        settle(&mut app);
+        if app.observer.coords() == before {
+            bail!("{}", app.status().unwrap_or("place not found"));
+        }
+        eprintln!("{}", app.status().unwrap_or_default());
+    }
     for path in &cli.plan {
         let text = platform::read_file(path).map_err(anyhow::Error::msg)?;
         app.load_plan(path, &text).map_err(anyhow::Error::msg)?;
@@ -263,6 +275,7 @@ fn render_once(mut app: App, size: &str, view: &str, keys: &str) -> Result<()> {
                 Some('e') => KeyCode::Esc,
                 Some('d') => KeyCode::Down,
                 Some('u') => KeyCode::Up,
+                Some('b') => KeyCode::Backspace,
                 _ => continue,
             },
             c => KeyCode::Char(c),
@@ -270,6 +283,7 @@ fn render_once(mut app: App, size: &str, view: &str, keys: &str) -> Result<()> {
         app.on_key(KeyEvent { code, ctrl: false });
         app.tick();
     }
+    settle(&mut app);
     app.forecast_now();
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h))?;
     terminal.draw(|f| ui::draw(f, &mut app))?;

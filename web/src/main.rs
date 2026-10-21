@@ -2,7 +2,7 @@
 //!
 //! The URL can set the area of interest and the opening screen, so that a
 //! forecast can be shared: `?lat=-3.10&lon=-60.02&name=Manaus&view=agenda`
-//! (also `map=1`, `days=7` and `geojson=<url>`). GeoJSON files dropped on
+//! (also `place=Berlim`, `map=1`, `days=7` and `geojson=<url>`). GeoJSON files dropped on
 //! the page become the area of interest; ESA plan KML files are loaded.
 
 use orbitui::app::{App, KeyCode, KeyEvent, Settings, View};
@@ -35,8 +35,11 @@ fn main() {
     app.globe.flat = param(&params, "map").is_some_and(|v| v == "1");
     if let Some(url) = param(&params, "geojson") {
         app.fetch_geojson(url);
+    } else if let Some(name) = param(&params, "place") {
+        app.search_place(&name, true);
     }
     let app = Rc::new(RefCell::new(app));
+    listen_keys(&app);
     accept_dropped_files(&app);
 
     // The page's CSS sizes the canvas to the window; the backend follows it.
@@ -52,15 +55,7 @@ fn main() {
     }
 }
 
-fn run<B: Backend + WebEventHandler + 'static>(mut terminal: Terminal<B>, app: Rc<RefCell<App>>) {
-    let keys = Rc::clone(&app);
-    terminal
-        .on_key_event(move |key| {
-            if let Some(key) = convert(key) {
-                keys.borrow_mut().on_key(key);
-            }
-        })
-        .ok();
+fn run<B: Backend + WebEventHandler + 'static>(terminal: Terminal<B>, app: Rc<RefCell<App>>) {
     terminal.draw_web(move |frame| {
         let mut app = app.borrow_mut();
         app.tick();
@@ -87,6 +82,27 @@ fn convert(key: ratzilla::event::KeyEvent) -> Option<KeyEvent> {
         _ => return None,
     };
     Some(KeyEvent { code, ctrl: key.ctrl })
+}
+
+/// Keys are read from the whole window, not the canvas: the canvas only
+/// hears them while it has the focus, and Tab, the app's own key, would move
+/// the focus away. The browser's default for the keys the app uses (focus
+/// change, scrolling, quick find) is cancelled; shortcuts with Ctrl, Alt or
+/// Meta, and function keys, are left to the browser.
+fn listen_keys(app: &Rc<RefCell<App>>) {
+    let Some(window) = web_sys::window() else { return };
+    let app = Rc::clone(app);
+    let on_key = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
+        if e.ctrl_key() || e.alt_key() || e.meta_key() {
+            return;
+        }
+        if let Some(key) = convert(e.clone().into()) {
+            e.prevent_default();
+            app.borrow_mut().on_key(key);
+        }
+    });
+    window.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref()).ok();
+    on_key.forget();
 }
 
 /// Files dropped on the page: GeoJSON becomes the area of interest, KML

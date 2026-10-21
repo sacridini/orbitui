@@ -134,6 +134,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.prompt.is_some() {
         draw_input(f, app, &theme);
     }
+    if app.picker.is_some() {
+        draw_picker(f, app, &theme);
+    }
 }
 
 fn draw_header(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
@@ -646,13 +649,15 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
 fn draw_input(f: &mut Frame, app: &App, theme: &Theme) {
     let Some(prompt) = &app.prompt else { return };
     let (title, help, example) = match prompt.kind {
-        PromptKind::Aoi if crate::platform::THREADS => {
-            ("area of interest", "Latitude, longitude and a name, or a GeoJSON file or URL", "-3.10, -60.02 Manaus   ·   area.geojson")
-        }
+        PromptKind::Aoi if crate::platform::THREADS => (
+            "area of interest",
+            "A place name, latitude and longitude, or a GeoJSON file or URL",
+            "Berlim   ·   -3.10, -60.02 Manaus   ·   area.geojson",
+        ),
         PromptKind::Aoi => (
             "area of interest",
-            "Latitude, longitude and a name, or a GeoJSON URL (or drop a file on the page)",
-            "-3.10, -60.02 Manaus",
+            "A place name, latitude and longitude, or a GeoJSON URL (or drop a file)",
+            "Berlim   ·   -3.10, -60.02 Manaus",
         ),
         PromptKind::AddSatellite => (
             "add satellite",
@@ -677,6 +682,35 @@ fn draw_input(f: &mut Frame, app: &App, theme: &Theme) {
     f.render_widget(Paragraph::new(lines).block(panel(title.into(), app, theme)), area);
 }
 
+fn draw_picker(f: &mut Frame, app: &App, theme: &Theme) {
+    let Some(picker) = &app.picker else { return };
+    let height = (picker.places.len() as u16 + 4).min(f.area().height);
+    let area = centered(f.area(), 84.min(f.area().width), height);
+    let mut lines: Vec<Line> = picker
+        .places
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let selected = i == picker.choice;
+            let style = if selected { Style::new().fg(theme.text).bg(theme.faint).add_modifier(Modifier::BOLD) } else { Style::new().fg(theme.text) };
+            let population = p.population.map_or(String::new(), |n| match n {
+                n if n >= 1_000_000 => format!("  pop {:.1} M", n as f64 / 1e6),
+                n if n >= 1_000 => format!("  pop {:.0} k", n as f64 / 1e3),
+                n => format!("  pop {n}"),
+            });
+            Line::from(vec![
+                Span::styled(if selected { "▸ " } else { "  " }, Style::new().fg(theme.accent)),
+                Span::styled(p.label(), style),
+                Span::styled(format!("  {}{population}", format_coords(p.lat, p.lon)), Style::new().fg(theme.dim)),
+            ])
+        })
+        .collect();
+    lines.push(Line::raw(""));
+    lines.push(hint_line(&[("↑↓", "choose"), ("enter", "set as AOI"), ("esc", "cancel")], theme));
+    f.render_widget(Clear, area);
+    f.render_widget(Paragraph::new(lines).block(panel(format!("places called \"{}\"", picker.query), app, theme)), area);
+}
+
 fn draw_help(f: &mut Frame, app: &App, theme: &Theme) {
     let keys: &[(&str, &str)] = &[
         ("tab  1  2", "switch monitor / agenda"),
@@ -697,7 +731,7 @@ fn draw_help(f: &mut Frame, app: &App, theme: &Theme) {
         ("f", "only the selected satellite"),
         ("z", "timeline span 12 / 24 / 48 / 72 h"),
         ("u", "local time / UTC"),
-        ("e", "set the area of interest"),
+        ("e", "set the area of interest (a place name works)"),
         ("i", "add a satellite by NORAD id"),
         ("x", "export the agenda as CSV and iCalendar"),
         ("P", "download ESA acquisition plans (Sentinel-1/2)"),
@@ -724,7 +758,7 @@ fn draw_help(f: &mut Frame, app: &App, theme: &Theme) {
         Style::new().fg(theme.dim),
     )));
     lines.push(Line::from(Span::styled(
-        "  Cloud forecast: weather data by Open-Meteo.com (CC BY 4.0).",
+        "  Clouds and place names: Open-Meteo.com (CC BY 4.0), GeoNames.",
         Style::new().fg(theme.dim),
     )));
     let area = centered(f.area(), 78.min(f.area().width), (lines.len() as u16 + 2).min(f.area().height));

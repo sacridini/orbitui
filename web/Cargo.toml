@@ -18,6 +18,7 @@ web-sys = { version = "0.3", features = [
     "DragEvent",
     "File",
     "FileList",
+    "KeyboardEvent",
     "Location",
     "UrlSearchParams",
     "Window",

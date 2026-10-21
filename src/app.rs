@@ -5,6 +5,7 @@ use crate::catalog::{self, SatInfo};
 use crate::clouds::{self, Clouds};
 use crate::coast::World;
 use crate::export;
+use crate::geocode::{self, Place};
 use crate::config;
 use crate::orbit::{Observer, Sat};
 use crate::plan::{self, Plans};
@@ -30,6 +31,8 @@ pub enum Msg {
     GeoJson(Result<String, String>),
     /// The cloud forecast for the AOI at these coordinates.
     Clouds(Result<String, String>, (f64, f64)),
+    /// Places found for a name, in the language at this index.
+    Places(Result<String, String>, String, usize),
     /// A Sentinel page listing acquisition plans.
     PlanPage(Result<String, String>),
     /// An acquisition plan (KML) and its file name.
@@ -71,6 +74,22 @@ pub enum PromptKind {
 pub struct Prompt {
     pub kind: PromptKind,
     pub text: String,
+}
+
+/// Places matching a name, for the user to choose from.
+pub struct PlacePicker {
+    pub query: String,
+    pub places: Vec<Place>,
+    pub choice: usize,
+}
+
+/// A place search in flight (one request per language).
+struct Search {
+    query: String,
+    pending: usize,
+    /// Answers by language, in order of preference.
+    found: Vec<Vec<Place>>,
+    pick_first: bool,
 }
 
 /// A download of elements: the Celestrak groups first, then the satellites
@@ -245,6 +264,8 @@ pub struct App {
     pub refreshing: bool,
     status: Option<(String, Instant)>,
     pub prompt: Option<Prompt>,
+    pub picker: Option<PlacePicker>,
+    search: Option<Search>,
     pub help: bool,
     pub marker: Marker,
     pub compat: bool,
@@ -311,6 +332,8 @@ impl App {
             refreshing: false,
             status: None,
             prompt: None,
+            picker: None,
+            search: None,
             help: false,
             marker,
             compat,
@@ -436,7 +459,56 @@ impl App {
 
     /// Downloads are in flight.
     pub fn busy(&self) -> bool {
-        self.refreshing || self.clouds_pending.is_some() || self.plan_pending > 0
+        self.refreshing || self.clouds_pending.is_some() || self.plan_pending > 0 || self.search.is_some()
+    }
+
+    /// Looks a place up by name. With several matches the user chooses,
+    /// unless `pick_first` (the best match is taken).
+    pub fn search_place(&mut self, query: &str, pick_first: bool) {
+        if self.settings.offline {
+            self.set_status("Offline: give the AOI as latitude, longitude");
+            return;
+        }
+        let languages = geocode::languages();
+        let found = vec![Vec::new(); languages.len()];
+        self.search = Some(Search { query: query.to_string(), pending: languages.len(), found, pick_first });
+        self.set_status(format!("Looking for {query}…"));
+        for (i, lang) in languages.iter().enumerate() {
+            let tx = self.tx.clone();
+            let q = query.to_string();
+            platform::get(geocode::url(query, lang), move |body| {
+                tx.send(Msg::Places(body, q, i)).ok();
+            });
+        }
+    }
+
+    fn on_places(&mut self, body: Result<String, String>, query: &str, lang: usize) {
+        let Some(search) = self.search.as_mut().filter(|s| s.query == query) else { return };
+        search.pending -= 1;
+        match body.and_then(|t| geocode::parse(&t)) {
+            Ok(places) => search.found[lang] = places,
+            Err(e) => self.set_status(format!("Place search failed: {e}")),
+        }
+        let Some(search) = self.search.take_if(|s| s.pending == 0) else { return };
+        // Merging in order of preference names each place in the first
+        // language that knows it.
+        let mut places = Vec::new();
+        for answer in search.found {
+            geocode::merge(&mut places, answer);
+        }
+        geocode::rank(&mut places);
+        match places.len() {
+            0 => self.set_status(format!("No place called \"{query}\"")),
+            1 => self.choose_place(&places[0]),
+            _ if search.pick_first => self.choose_place(&places[0]),
+            _ => self.picker = Some(PlacePicker { query: search.query, places, choice: 0 }),
+        }
+    }
+
+    fn choose_place(&mut self, place: &Place) {
+        self.picker = None;
+        self.set_observer(Observer::new(place.name.clone(), place.lat, place.lon, place.elevation));
+        self.set_status(format!("AOI set to {} ({})", place.label(), self.observer.coords()));
     }
 
     /// Catalog satellites ESA publishes plans for.
@@ -703,6 +775,7 @@ impl App {
                     }
                 }
                 Msg::Clouds(..) => {}
+                Msg::Places(body, query, lang) => self.on_places(body, &query, lang),
                 Msg::PlanPage(body) => {
                     self.plan_pending = self.plan_pending.saturating_sub(1);
                     if let Ok(page) = body {
@@ -864,6 +937,21 @@ impl App {
             self.quit = true;
             return;
         }
+        if let Some(picker) = &mut self.picker {
+            match key.code {
+                KeyCode::Esc => self.picker = None,
+                KeyCode::Up | KeyCode::Char('k') => picker.choice = picker.choice.saturating_sub(1),
+                KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
+                    picker.choice = (picker.choice + 1).min(picker.places.len() - 1);
+                }
+                KeyCode::Enter => {
+                    let place = picker.places[picker.choice].clone();
+                    self.choose_place(&place);
+                }
+                _ => {}
+            }
+            return;
+        }
         if let Some(prompt) = &mut self.prompt {
             match key.code {
                 KeyCode::Esc => self.prompt = None,
@@ -881,7 +969,11 @@ impl App {
                             }
                             None if text.trim().to_lowercase().ends_with("json") => platform::read_file(text.trim())
                                 .and_then(|t| self.set_geojson(&t, &config::file_stem(text.trim()))),
-                            None => Err("Expected: lat, lon [name], a GeoJSON file or URL".to_string()),
+                            None if text.trim().chars().any(char::is_alphabetic) => {
+                                self.search_place(text.trim(), false);
+                                Ok(())
+                            }
+                            None => Err("Expected a place name, \"lat, lon [name]\", or a GeoJSON file or URL".to_string()),
                         },
                         PromptKind::AddSatellite => self.add_satellite(&text),
                     };
