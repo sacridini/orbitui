@@ -1,21 +1,6 @@
-# orbitui
+<p align="center"><img src="assets/logo.svg" alt="orbitui" width="560"></p>
 
-```text
-    =[O]=
-       \
-          \\       .--'''''''''--.
-             \\ .-'#             #'-.                      __    _ __        _
-              /\  \             ###::'\        ____  _____/ /_  (_) /___  __(_)
-             /### \  \          ####:::\      / __ \/ ___/ __ \/ / __/ / / / /
-            |     ###\## \        #: :::|    / /_/ / /  / /_/ / / /_/ /_/ / /
-            |    ###[=====]#          ::|    \____/_/  /_.___/_/\__/\__,_/_/
-            |      ########           ::|
-            |       #####             ::|      when will a satellite image my area?
-             \       ###             ::/
-              \_     #               _/
-                -._               _.-
-                   '-.._______..-'
-```
+<h1 align="center">orbitui</h1>
 
 **When will a satellite image my area?** `orbitui` is a terminal planner of Earth
 observation overpasses. It propagates the orbits of Sentinel, Landsat, CBERS,

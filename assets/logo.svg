@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="588" height="244" viewBox="0 0 588 244" role="img" aria-label="orbitui">
+  <defs>
+    <linearGradient id="spectrum" gradientUnits="userSpaceOnUse" x1="36" y1="0" x2="552" y2="0">
+      <stop offset="0.000" stop-color="#7f00ff"/>
+      <stop offset="0.188" stop-color="#2a3cff"/>
+      <stop offset="0.312" stop-color="#00a8ff"/>
+      <stop offset="0.375" stop-color="#00e5c8"/>
+      <stop offset="0.469" stop-color="#28e83c"/>
+      <stop offset="0.594" stop-color="#d8f000"/>
+      <stop offset="0.656" stop-color="#ffc400"/>
+      <stop offset="0.750" stop-color="#ff6a00"/>
+      <stop offset="1.000" stop-color="#ff1f3d"/>
+    </linearGradient>
+  </defs>
+  <rect width="588" height="244" rx="12" fill="#0d1117"/>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace"
+     font-size="20" font-weight="700" fill="url(#spectrum)">
+    <text x="36" y="48.4" textLength="516.0" lengthAdjust="spacingAndGlyphs">&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;888&#160;&#160;&#160;&#160;&#160;d8b888&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;d8b</text>
+    <text x="36" y="71.4" textLength="516.0" lengthAdjust="spacingAndGlyphs">&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;888&#160;&#160;&#160;&#160;&#160;Y8P888&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;Y8P</text>
+    <text x="36" y="94.4" textLength="348.0" lengthAdjust="spacingAndGlyphs">&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;888&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;888</text>
+    <text x="36" y="117.4" textLength="516.0" lengthAdjust="spacingAndGlyphs">&#160;.d88b.&#160;888d88888888b.&#160;888888888888&#160;&#160;888888</text>
+    <text x="36" y="140.4" textLength="516.0" lengthAdjust="spacingAndGlyphs">d88""88b888P"&#160;&#160;888&#160;"88b888888&#160;&#160;&#160;888&#160;&#160;888888</text>
+    <text x="36" y="163.4" textLength="516.0" lengthAdjust="spacingAndGlyphs">888&#160;&#160;888888&#160;&#160;&#160;&#160;888&#160;&#160;888888888&#160;&#160;&#160;888&#160;&#160;888888</text>
+    <text x="36" y="186.4" textLength="516.0" lengthAdjust="spacingAndGlyphs">Y88..88P888&#160;&#160;&#160;&#160;888&#160;d88P888Y88b.&#160;Y88b&#160;888888</text>
+    <text x="36" y="209.4" textLength="516.0" lengthAdjust="spacingAndGlyphs">&#160;"Y88P"&#160;888&#160;&#160;&#160;&#160;88888P"&#160;888&#160;"Y888&#160;"Y88888888</text>
+  </g>
+</svg>
