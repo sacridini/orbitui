@@ -1,6 +1,11 @@
+[workspace]
+members = [".", "web"]
+default-members = ["."]
+resolver = "3"
+
 [package]
 name = "orbitui"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Terminal planner of Earth observation satellite overpasses and imaging opportunities"
 license = "MIT"
@@ -10,15 +15,43 @@ homepage = "https://sacridini.github.io/orbitui/"
 keywords = ["satellite", "remote-sensing", "tui", "sgp4", "orbit"]
 categories = ["command-line-utilities", "science::geo"]
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "orbitui"
+path = "src/main.rs"
+
 [dependencies]
-anyhow = "1"
 chrono = "0.4"
-clap = { version = "4", features = ["derive"] }
-crossterm = "0.28"
-directories = "5"
-ratatui = "0.29"
+ratatui = { version = "0.30", default-features = false, features = ["std", "layout-cache", "underline-color"] }
 sgp4 = "2"
+web-time = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.29"
+directories = "6"
+ratatui = { version = "0.30", features = ["crossterm"] }
 ureq = "2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "Blob",
+    "BlobPropertyBag",
+    "Document",
+    "Element",
+    "HtmlAnchorElement",
+    "HtmlElement",
+    "Response",
+    "Storage",
+    "Url",
+    "Window",
+] }
 
 # Propagation runs ~10^6 times per forecast: keep debug builds usable.
 [profile.dev]

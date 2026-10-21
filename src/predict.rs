@@ -7,6 +7,7 @@ use crate::astro::{self, MEAN_RADIUS_KM};
 use crate::catalog::Kind;
 use crate::orbit::{Observer, Sat};
 use chrono::{DateTime, Duration, Utc};
+use std::sync::Arc;
 
 /// Grid step in seconds (~140 km of ground track for a LEO satellite).
 const STEP_S: f64 = 20.0;
@@ -96,9 +97,58 @@ pub fn forecast(sats: &[Sat], obs: &Observer, start: DateTime<Utc>, end: DateTim
     for (i, sat) in sats.iter().enumerate() {
         scan(i, sat, obs, start, end, min_el, &mut fc);
     }
-    fc.acquisitions.sort_by_key(|a| a.time);
-    fc.passes.sort_by_key(|p| p.aos);
+    fc.sort();
     fc
+}
+
+impl Forecast {
+    fn sort(&mut self) {
+        self.acquisitions.sort_by_key(|a| a.time);
+        self.passes.sort_by_key(|p| p.aos);
+    }
+}
+
+/// A forecast computed one satellite at a time, so that it can advance
+/// between frames where there are no threads (the browser).
+pub struct Job {
+    sats: Arc<Vec<Sat>>,
+    obs: Observer,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    min_el: f64,
+    next: usize,
+    fc: Forecast,
+}
+
+impl Job {
+    pub fn new(sats: Arc<Vec<Sat>>, obs: Observer, start: DateTime<Utc>, end: DateTime<Utc>, min_el: f64) -> Self {
+        Job { sats, obs, start, end, min_el, next: 0, fc: Forecast { acquisitions: Vec::new(), passes: Vec::new() } }
+    }
+
+    /// Scans satellites until `budget` is spent; the forecast once complete.
+    pub fn step(&mut self, budget: web_time::Duration) -> Option<Forecast> {
+        let began = web_time::Instant::now();
+        while self.next < self.sats.len() {
+            scan(self.next, &self.sats[self.next], &self.obs, self.start, self.end, self.min_el, &mut self.fc);
+            self.next += 1;
+            if began.elapsed() >= budget {
+                break;
+            }
+        }
+        (self.next == self.sats.len()).then(|| {
+            let mut fc = std::mem::replace(&mut self.fc, Forecast { acquisitions: Vec::new(), passes: Vec::new() });
+            fc.sort();
+            fc
+        })
+    }
+
+    pub fn run(mut self) -> Forecast {
+        loop {
+            if let Some(fc) = self.step(web_time::Duration::MAX) {
+                return fc;
+            }
+        }
+    }
 }
 
 fn scan(i: usize, sat: &Sat, obs: &Observer, start: DateTime<Utc>, end: DateTime<Utc>, min_el: f64, fc: &mut Forecast) {

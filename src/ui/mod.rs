@@ -192,7 +192,10 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         View::Monitor => vec![("tab", "agenda"), ("↑↓", "satellite")],
         View::Agenda => vec![("tab", "monitor"), ("↑↓", "event"), ("v", "images/passes")],
     };
-    let common = [("[ ]", "time warp"), ("space", "pause"), ("0", "now"), ("e", "AOI"), ("u", "UTC"), ("r", "TLE"), ("?", "help"), ("q", "quit")];
+    let mut common = vec![("[ ]", "time warp"), ("space", "pause"), ("0", "now"), ("e", "AOI"), ("u", "UTC"), ("r", "TLE"), ("?", "help")];
+    if crate::platform::THREADS {
+        common.push(("q", "quit"));
+    }
     let keys: Vec<(&str, &str)> = view.into_iter().chain(common).collect();
     f.render_widget(Paragraph::new(hint_line(&keys, theme)), area);
 }

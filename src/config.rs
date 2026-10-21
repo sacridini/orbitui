@@ -1,11 +1,9 @@
 //! The last area of interest, remembered between sessions.
 
 use crate::orbit::Observer;
-use std::path::PathBuf;
+use crate::platform;
 
-fn path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "orbitui").map(|d| d.config_dir().join("aoi.txt"))
-}
+const KEY: &str = "aoi";
 
 /// Brasília, until the user picks an area.
 pub fn default_observer() -> Observer {
@@ -13,7 +11,7 @@ pub fn default_observer() -> Observer {
 }
 
 pub fn load() -> Option<Observer> {
-    let text = std::fs::read_to_string(path()?).ok()?;
+    let text = platform::load(KEY)?;
     let mut name = String::from("AOI");
     let (mut lat, mut lon, mut alt) = (None, None, 0.0);
     for line in text.lines() {
@@ -31,10 +29,6 @@ pub fn load() -> Option<Observer> {
 }
 
 pub fn save(obs: &Observer) {
-    let Some(path) = path() else { return };
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).ok();
-    }
     let text = format!(
         "name = {}\nlat = {}\nlon = {}\nalt_m = {}\n",
         obs.name,
@@ -42,7 +36,7 @@ pub fn save(obs: &Observer) {
         obs.lon,
         obs.alt_km * 1000.0
     );
-    std::fs::write(path, text).ok();
+    platform::save(KEY, &text);
 }
 
 /// Parses "lat, lon[, name]" or "lat lon [name]".

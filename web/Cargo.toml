@@ -1,0 +1,13 @@
+[package]
+name = "orbitui-web"
+version = "0.2.0"
+edition = "2024"
+publish = false
+description = "orbitui in the browser"
+license = "MIT"
+
+[dependencies]
+console_error_panic_hook = "0.1"
+orbitui = { path = ".." }
+ratzilla = "0.3"
+web-sys = { version = "0.3", features = ["Location", "UrlSearchParams", "Window"] }

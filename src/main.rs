@@ -1,21 +1,12 @@
 //! orbitui: terminal planner of Earth observation satellite overpasses.
 
-mod app;
-mod astro;
-mod catalog;
-mod coast;
-mod config;
-mod orbit;
-mod predict;
-mod tle;
-mod ui;
-
 use anyhow::{Context, Result, bail};
-use app::{App, Settings, View};
 use chrono::{DateTime, Utc};
 use clap::{Parser, ValueEnum};
-use crossterm::event::{self, Event, KeyEventKind};
-use orbit::Observer;
+use crossterm::event::{self, Event, KeyCode as Code, KeyEventKind, KeyModifiers};
+use orbitui::app::{self, App, KeyCode, KeyEvent, Settings, View};
+use orbitui::orbit::Observer;
+use orbitui::{config, platform, tle, ui};
 use ratatui::symbols::Marker;
 use std::time::Duration;
 
@@ -95,20 +86,6 @@ fn main() -> Result<()> {
         bail!("--days must be between 1 and 14");
     }
 
-    if cli.fetch {
-        let set = tle::fetch(&catalog::norad_ids())?;
-        for sat in catalog::CATALOG {
-            match set.raw.iter().find(|r| r.norad() == Some(sat.norad)).and_then(|r| r.elements()) {
-                Some(e) => println!("{:<12} epoch {} UTC", sat.name, e.datetime.format("%Y-%m-%d %H:%M")),
-                None => println!("{:<12} missing", sat.name),
-            }
-        }
-        if let Some(path) = tle::cache_path() {
-            println!("saved to {}", path.display());
-        }
-        return Ok(());
-    }
-
     let observer = match (cli.lat, cli.lon) {
         (Some(lat), Some(lon)) => {
             if lat.abs() > 90.0 || lon.abs() > 180.0 {
@@ -130,7 +107,7 @@ fn main() -> Result<()> {
         MarkerArg::Auto if compat => Marker::HalfBlock,
         MarkerArg::Auto => Marker::Braille,
     };
-    let offline = cli.offline || cli.render.is_some() || cli.list;
+    let offline = cli.offline || cli.render.is_some() || cli.list || cli.fetch;
     let settings = Settings { days: cli.days, min_el: cli.min_elev, offline };
     let mut app = App::new(observer, settings, marker, compat);
     app.globe.flat = cli.map;
@@ -138,6 +115,9 @@ fn main() -> Result<()> {
         app.clock = app::Clock::starting_at(t);
     }
 
+    if cli.fetch {
+        return fetch(app);
+    }
     if cli.list {
         print_forecast(&mut app);
         return Ok(());
@@ -162,6 +142,7 @@ fn run(mut terminal: ratatui::DefaultTerminal, mut app: App) -> Result<()> {
                 // Windows reports key releases too; act on presses only.
                 if let Event::Key(key) = event::read()?
                     && key.kind != KeyEventKind::Release
+                    && let Some(key) = convert(key)
                 {
                     app.on_key(key);
                 }
@@ -170,6 +151,49 @@ fn run(mut terminal: ratatui::DefaultTerminal, mut app: App) -> Result<()> {
                 }
             }
         }
+    }
+    Ok(())
+}
+
+fn convert(key: crossterm::event::KeyEvent) -> Option<KeyEvent> {
+    let code = match key.code {
+        Code::Char(c) => KeyCode::Char(c),
+        Code::Enter => KeyCode::Enter,
+        Code::Esc => KeyCode::Esc,
+        Code::Backspace => KeyCode::Backspace,
+        Code::Tab => KeyCode::Tab,
+        Code::BackTab => KeyCode::BackTab,
+        Code::Up => KeyCode::Up,
+        Code::Down => KeyCode::Down,
+        Code::Left => KeyCode::Left,
+        Code::Right => KeyCode::Right,
+        Code::PageUp => KeyCode::PageUp,
+        Code::PageDown => KeyCode::PageDown,
+        Code::Home => KeyCode::Home,
+        Code::End => KeyCode::End,
+        _ => return None,
+    };
+    Some(KeyEvent { code, ctrl: key.modifiers.contains(KeyModifiers::CONTROL) })
+}
+
+/// Downloads fresh elements through the app's own download and reports them.
+fn fetch(mut app: App) -> Result<()> {
+    app.refresh_tle();
+    while app.refreshing {
+        app.tick();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    if app.tle_source != tle::Source::Celestrak {
+        bail!("{}", app.status().unwrap_or("download failed"));
+    }
+    for info in &app.catalog {
+        match app.sats.iter().find(|s| s.info.norad == info.norad) {
+            Some(sat) => println!("{:<12} epoch {} UTC", info.name, sat.epoch().format("%Y-%m-%d %H:%M")),
+            None => println!("{:<12} missing", info.name),
+        }
+    }
+    if let Some(path) = platform::location("cache.tle") {
+        println!("saved to {}", path.display());
     }
     Ok(())
 }

@@ -11,7 +11,7 @@ strip*, how far off-nadir, ascending or descending, and is it daylight for an
 optical sensor.
 
 Pure Rust, one binary, runs in Windows Terminal, PowerShell, CMD, bash, zsh,
-over SSH.
+over SSH, and **in the browser**: <https://sacridini.github.io/orbitui/>.
 
 ## Screens
 
@@ -32,8 +32,14 @@ whole repeat cycle unfold.
 ## Install
 
 ```sh
-cargo install --path .
+cargo install --git https://github.com/sacridini/orbitui
 ```
+
+Or open the web version, the same app compiled to WebAssembly:
+<https://sacridini.github.io/orbitui/>. The URL takes the area of interest
+and the opening screen, so a forecast can be shared:
+<https://sacridini.github.io/orbitui/?lat=-3.10&lon=-60.02&name=Manaus&view=agenda>
+(also `map=1` and `days=7`).
 
 ## Use
 
@@ -106,6 +112,16 @@ schedule, Sentinel-1 alternates modes) and on clouds.
 | ISS | (tracked only) | |
 
 The list lives in `src/catalog.rs`.
+
+## Layout
+
+- `src/lib.rs`: orbits, predictions and the ratatui interface, shared by both
+  frontends. `src/platform.rs` holds what differs between them (network,
+  storage, downloads).
+- `src/main.rs`: the terminal frontend (crossterm).
+- `web/`: the browser frontend ([Ratzilla](https://github.com/ratatui/ratzilla),
+  WebGL2). Build it with [Trunk](https://trunkrs.dev): `cd web && trunk serve`.
+  Celestrak serves elements with CORS, so the page needs no server.
 
 ## Data
 

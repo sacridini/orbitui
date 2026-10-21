@@ -94,6 +94,7 @@ pub const CATALOG: &[SatInfo] = &[
     sat(25544, "ISS", "ISS", "-", 0.0, Station, Color::White),
 ];
 
-pub fn norad_ids() -> Vec<u64> {
-    CATALOG.iter().map(|s| s.norad).collect()
+/// The missions tracked out of the box.
+pub fn builtin() -> Vec<SatInfo> {
+    CATALOG.to_vec()
 }

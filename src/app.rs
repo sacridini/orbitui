@@ -1,22 +1,57 @@
 //! Application state, background work and key handling.
 
-use crate::catalog::{self, CATALOG};
+use crate::catalog::{self, SatInfo};
 use crate::coast::World;
 use crate::config;
 use crate::orbit::{Observer, Sat};
+use crate::platform;
 use crate::predict::{self, Acquisition, Forecast, Pass};
-use crate::tle::{self, Source, TleSet};
+use crate::tle::{self, Raw, Source, TleSet};
 use chrono::{DateTime, Duration, Utc};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::symbols::Marker;
 use ratatui::widgets::TableState;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::Instant;
+use web_time::Instant;
 
 pub enum Msg {
     Forecast { job: u64, forecast: Forecast },
-    Tle(Result<TleSet, String>),
+    /// One Celestrak response of the download in progress.
+    Tle(Result<String, String>),
+}
+
+/// Keys, independent of the terminal or browser that produced them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyCode {
+    Char(char),
+    Enter,
+    Esc,
+    Backspace,
+    Tab,
+    BackTab,
+    Up,
+    Down,
+    Left,
+    Right,
+    PageUp,
+    PageDown,
+    Home,
+    End,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct KeyEvent {
+    pub code: KeyCode,
+    pub ctrl: bool,
+}
+
+/// A download of elements: the Celestrak groups first, then the satellites
+/// they lacked, one by one.
+struct TleFetch {
+    pending: usize,
+    by_id: bool,
+    found: Vec<Raw>,
 }
 
 /// Simulation time: real time, shifted, sped up or frozen.
@@ -164,7 +199,11 @@ pub struct App {
     pub forecast: Option<Forecast>,
     window: Option<(DateTime<Utc>, DateTime<Utc>)>,
     job: u64,
+    /// Forecast advancing between frames when there are no threads.
+    slices: Option<predict::Job>,
     pub computing: bool,
+    pub catalog: Vec<SatInfo>,
+    tle_fetch: Option<TleFetch>,
     pub tle_source: Source,
     pub tle_fetched: Option<DateTime<Utc>>,
     pub refreshing: bool,
@@ -180,8 +219,8 @@ pub struct App {
     pub quit: bool,
 }
 
-fn build_sats(set: &TleSet) -> Vec<Sat> {
-    CATALOG
+fn build_sats(set: &TleSet, catalog: &[SatInfo]) -> Vec<Sat> {
+    catalog
         .iter()
         .filter_map(|info| {
             let raw = set.raw.iter().find(|r| r.norad() == Some(info.norad))?;
@@ -193,9 +232,13 @@ fn build_sats(set: &TleSet) -> Vec<Sat> {
 impl App {
     pub fn new(observer: Observer, settings: Settings, marker: Marker, compat: bool) -> Self {
         let set = tle::load_local();
+        let catalog = catalog::builtin();
         let (tx, rx) = mpsc::channel();
         let mut app = App {
-            sats: Arc::new(build_sats(&set)),
+            sats: Arc::new(build_sats(&set, &catalog)),
+            catalog,
+            tle_fetch: None,
+            slices: None,
             globe: Globe { center: Center::Aoi, lat: observer.lat, lon: observer.lon, zoom: 1.0, spin: false, flat: false },
             observer,
             world: World::load(),
@@ -262,28 +305,93 @@ impl App {
         self.job += 1;
         let job = self.job;
         let (start, end) = self.window_at(self.clock.now());
-        let sats = Arc::clone(&self.sats);
-        let obs = self.observer.clone();
-        let min_el = self.settings.min_el;
-        let tx = self.tx.clone();
+        let task = predict::Job::new(Arc::clone(&self.sats), self.observer.clone(), start, end, self.settings.min_el);
         self.window = Some((start, end));
         self.computing = true;
-        std::thread::spawn(move || {
-            let forecast = predict::forecast(&sats, &obs, start, end, min_el);
-            tx.send(Msg::Forecast { job, forecast }).ok();
-        });
+        if platform::THREADS {
+            let tx = self.tx.clone();
+            std::thread::spawn(move || {
+                tx.send(Msg::Forecast { job, forecast: task.run() }).ok();
+            });
+        } else {
+            self.slices = Some(task);
+        }
     }
 
-    fn refresh_tle(&mut self) {
+    pub fn refresh_tle(&mut self) {
         if self.refreshing {
             return;
         }
         self.refreshing = true;
+        self.tle_fetch = Some(TleFetch { pending: tle::GROUPS.len(), by_id: false, found: Vec::new() });
+        for group in tle::GROUPS {
+            self.get(tle::group_url(group), Msg::Tle);
+        }
+    }
+
+    fn get(&self, url: String, wrap: fn(Result<String, String>) -> Msg) {
         let tx = self.tx.clone();
-        std::thread::spawn(move || {
-            let result = tle::fetch(&catalog::norad_ids()).map_err(|e| format!("{e:#}"));
-            tx.send(Msg::Tle(result)).ok();
+        platform::get(url, move |body| {
+            tx.send(wrap(body)).ok();
         });
+    }
+
+    /// Collects one Celestrak response; finishes the download after the last.
+    fn on_tle_response(&mut self, body: Result<String, String>) {
+        let wanted: HashSet<u64> = self.catalog.iter().map(|s| s.norad).collect();
+        let Some(fetch) = &mut self.tle_fetch else { return };
+        fetch.pending = fetch.pending.saturating_sub(1);
+        if let Ok(text) = &body {
+            for r in tle::parse(text) {
+                if let Some(id) = r.norad()
+                    && wanted.contains(&id)
+                    && !fetch.found.iter().any(|f| f.norad() == Some(id))
+                {
+                    fetch.found.push(r);
+                }
+            }
+        }
+        if fetch.pending > 0 {
+            return;
+        }
+        if !fetch.by_id {
+            let have: HashSet<u64> = fetch.found.iter().filter_map(Raw::norad).collect();
+            let missing: Vec<u64> = self.catalog.iter().map(|s| s.norad).filter(|id| !have.contains(id)).collect();
+            if !missing.is_empty() {
+                fetch.by_id = true;
+                fetch.pending = missing.len();
+                for id in missing {
+                    self.get(tle::catnr_url(id), Msg::Tle);
+                }
+                return;
+            }
+        }
+        let found = std::mem::take(&mut fetch.found);
+        self.tle_fetch = None;
+        self.refreshing = false;
+        if found.is_empty() {
+            let why = body.err().unwrap_or_else(|| "no elements".into());
+            self.set_status(format!("TLE download failed, using {}: {why}", self.tle_source.label()));
+            return;
+        }
+        self.install(tle::store(found));
+    }
+
+    fn install(&mut self, set: TleSet) {
+        let sats = build_sats(&set, &self.catalog);
+        let n = sats.len();
+        if n == 0 {
+            return;
+        }
+        // Indices of the old forecast may not match the new list.
+        self.forecast = None;
+        self.selected_event = None;
+        self.sats = Arc::new(sats);
+        self.select_sat(self.selected.min(n - 1));
+        self.tle_source = set.source;
+        self.tle_fetched = set.fetched;
+        self.request_forecast();
+        self.set_status(format!("Elements updated from Celestrak ({n} satellites)"));
     }
 
     /// Advances animation, collects background results, keeps the forecast
@@ -302,27 +410,16 @@ impl App {
                     self.computing = false;
                 }
                 Msg::Forecast { .. } => {}
-                Msg::Tle(Ok(set)) => {
-                    self.refreshing = false;
-                    let sats = build_sats(&set);
-                    let n = sats.len();
-                    if n > 0 {
-                        // Indices of the old forecast may not match the new list.
-                        self.forecast = None;
-                        self.selected_event = None;
-                        self.sats = Arc::new(sats);
-                        self.select_sat(self.selected.min(n - 1));
-                        self.tle_source = set.source;
-                        self.tle_fetched = set.fetched;
-                        self.request_forecast();
-                        self.set_status(format!("Elements updated from Celestrak ({n} satellites)"));
-                    }
-                }
-                Msg::Tle(Err(e)) => {
-                    self.refreshing = false;
-                    self.set_status(format!("TLE download failed, using {}: {e}", self.tle_source.label()));
-                }
+                Msg::Tle(body) => self.on_tle_response(body),
             }
+        }
+
+        if let Some(task) = &mut self.slices
+            && let Some(forecast) = task.step(web_time::Duration::from_millis(12))
+        {
+            self.forecast = Some(forecast);
+            self.slices = None;
+            self.computing = false;
         }
 
         let now = self.clock.now();
@@ -424,7 +521,7 @@ impl App {
     }
 
     pub fn on_key(&mut self, key: KeyEvent) {
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        if key.ctrl && key.code == KeyCode::Char('c') {
             self.quit = true;
             return;
         }
