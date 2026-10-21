@@ -113,7 +113,7 @@ fn main() -> Result<()> {
         MarkerArg::Auto if compat => Marker::HalfBlock,
         MarkerArg::Auto => Marker::Braille,
     };
-    let offline = cli.offline || cli.render.is_some() || cli.list || cli.fetch;
+    let offline = cli.offline || cli.fetch;
     let settings = Settings { days: cli.days, min_el: cli.min_elev, offline };
     let mut app = App::new(observer, settings, marker, compat);
     app.globe.flat = cli.map;
@@ -130,10 +130,12 @@ fn main() -> Result<()> {
         return fetch(app);
     }
     if cli.list {
+        settle(&mut app);
         print_forecast(&mut app);
         return Ok(());
     }
     if let Some(size) = &cli.render {
+        settle(&mut app);
         return render_once(app, size, &cli.view, &cli.keys);
     }
 
@@ -185,6 +187,16 @@ fn convert(key: crossterm::event::KeyEvent) -> Option<KeyEvent> {
         _ => return None,
     };
     Some(KeyEvent { code, ctrl: key.modifiers.contains(KeyModifiers::CONTROL) })
+}
+
+/// Lets the downloads started by the app finish (for one-shot output).
+fn settle(app: &mut App) {
+    let began = std::time::Instant::now();
+    app.tick();
+    while app.busy() && began.elapsed() < Duration::from_secs(30) {
+        std::thread::sleep(Duration::from_millis(50));
+        app.tick();
+    }
 }
 
 /// Downloads fresh elements through the app's own download and reports them.
@@ -247,21 +259,22 @@ fn print_forecast(app: &mut App) {
     println!("# {} ({}), from {} UTC", app.observer.name, app.observer.coords(), now.format("%Y-%m-%d %H:%M"));
     println!("
 # imaging opportunities");
-    println!("{:<12} {:<19} {:>4} {:>9} {:>8} {:>6} {:>6}", "satellite", "time_utc", "dir", "xtrack_km", "offnadir", "sun_el", "cover");
+    println!("{:<12} {:<19} {:>4} {:>9} {:>8} {:>6} {:>6} {:>6}", "satellite", "time_utc", "dir", "xtrack_km", "offnadir", "sun_el", "cover", "cloud");
     for a in fc.acquisitions.iter().filter(|a| a.time >= now) {
         let sat = &app.sats[a.sat];
         if !a.usable(sat.info.kind) {
             continue;
         }
         println!(
-            "{:<12} {:<19} {:>4} {:>9.1} {:>8.1} {:>6.1} {:>5.0}%",
+            "{:<12} {:<19} {:>4} {:>9.1} {:>8.1} {:>6.1} {:>5.0}% {:>6}",
             sat.info.name,
             a.time.format("%Y-%m-%d %H:%M:%S"),
             if a.ascending { "asc" } else { "desc" },
             a.cross_km,
             a.off_nadir,
             a.sun_el,
-            a.coverage * 100.0
+            a.coverage * 100.0,
+            app.cloud_at(a.time).map_or("-".to_string(), |c| format!("{c:.0}%"))
         );
     }
     println!("

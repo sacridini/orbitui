@@ -8,6 +8,7 @@ pub mod aoi;
 pub mod app;
 pub mod astro;
 pub mod catalog;
+pub mod clouds;
 pub mod coast;
 pub mod config;
 pub mod orbit;

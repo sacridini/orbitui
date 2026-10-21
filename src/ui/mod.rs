@@ -33,6 +33,7 @@ pub struct Theme {
     pub track_past: Color,
     pub swath: Color,
     pub sun: Color,
+    pub cloud: Color,
     pub aoi: Color,
     pub now: Color,
     pub good: Color,
@@ -61,6 +62,7 @@ impl Theme {
             track_past: pick(242, Color::DarkGray),
             swath: pick(238, Color::DarkGray),
             sun: pick(220, Color::Yellow),
+            cloud: pick(250, Color::Gray),
             aoi: Color::White,
             now: pick(214, Color::Yellow),
             good: Color::Green,
@@ -339,6 +341,9 @@ fn draw_sat_details(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 format!("  {:.0} km {}  ☼ {:.0}°", a.cross_km.abs(), if a.cross_km >= 0.0 { "R" } else { "L" }, a.sun_el),
                 Style::new().fg(theme.dim),
             ));
+            if let Some(c) = app.cloud_at(a.time) {
+                v.push(Span::styled(format!("  ☁ {c:.0}%"), Style::new().fg(theme.dim)));
+            }
             v
         }
         None if !info.images() => kv("next image", "-", theme),
@@ -439,6 +444,18 @@ fn solar_time(t: DateTime<Utc>, lon: f64) -> String {
     format!("{:02}:{:02} at AOI", minutes / 60, minutes % 60)
 }
 
+fn cloud_span(cloud: Option<f64>, kind: Kind, theme: &Theme) -> Span<'static> {
+    let Some(v) = cloud else { return Span::styled("    -", Style::new().fg(theme.dim)) };
+    // Radar sees through clouds.
+    let color = match (kind, v) {
+        (Kind::Sar, _) => theme.dim,
+        (_, v) if v < 30.0 => theme.good,
+        (_, v) if v < 70.0 => theme.warn,
+        _ => theme.bad,
+    };
+    Span::styled(format!("{v:>4.0}%"), Style::new().fg(color))
+}
+
 fn coverage_span(coverage: f64, theme: &Theme) -> Span<'static> {
     let color = if coverage >= 0.95 {
         theme.good
@@ -488,6 +505,9 @@ fn draw_events(f: &mut Frame, area: Rect, app: &mut App, theme: &Theme) {
                         if app.observer.area.is_some() {
                             cells.push(Cell::from(coverage_span(a.coverage, theme)));
                         }
+                        if app.clouds.is_some() {
+                            cells.push(Cell::from(cloud_span(app.cloud_at(a.time), kind, theme)));
+                        }
                         Row::new(cells)
                     }
                     Event::Pass(p) => Row::new(vec![
@@ -509,6 +529,9 @@ fn draw_events(f: &mut Frame, area: Rect, app: &mut App, theme: &Theme) {
                 let mut columns = vec![("SATELLITE", 12), ("DATE", 10), ("TIME", 8), ("IN", 7), ("", 1), ("X-TRACK", 7), ("OFF-NAD", 7), ("SUN", 5)];
                 if app.observer.area.is_some() {
                     columns.push(("COVER", 5));
+                }
+                if app.clouds.is_some() {
+                    columns.push(("CLOUD", 5));
                 }
                 columns.into_iter().map(|(h, w)| (h, Constraint::Length(w))).unzip()
             }
@@ -562,6 +585,11 @@ fn draw_event_info(f: &mut Frame, area: Rect, app: &App, theme: &Theme, ev: &Sel
     ];
     for (k, v) in &ev.lines {
         lines.push(Line::from(kv(k, v.clone(), theme)));
+    }
+    if ev.light.is_some()
+        && let Some(v) = app.cloud_at(ev.time)
+    {
+        lines.push(Line::from(kv("clouds", format!("{v:.0}% forecast (Open-Meteo)"), theme)));
     }
     if let Some(light) = ev.light {
         let verdict = match (info.kind, light) {
@@ -658,6 +686,10 @@ fn draw_help(f: &mut Frame, app: &App, theme: &Theme) {
     )));
     lines.push(Line::from(Span::styled(
         "  Actual acquisitions follow each mission's observation plan.",
+        Style::new().fg(theme.dim),
+    )));
+    lines.push(Line::from(Span::styled(
+        "  Cloud forecast: weather data by Open-Meteo.com (CC BY 4.0).",
         Style::new().fg(theme.dim),
     )));
     let area = centered(f.area(), 78.min(f.area().width), (lines.len() as u16 + 2).min(f.area().height));

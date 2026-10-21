@@ -2,6 +2,7 @@
 
 use crate::aoi::{self, Shape};
 use crate::catalog::{self, SatInfo};
+use crate::clouds::{self, Clouds};
 use crate::coast::World;
 use crate::config;
 use crate::orbit::{Observer, Sat};
@@ -22,6 +23,8 @@ pub enum Msg {
     Tle(Result<String, String>),
     /// A GeoJSON area of interest fetched from a URL.
     GeoJson(Result<String, String>),
+    /// The cloud forecast for the AOI at these coordinates.
+    Clouds(Result<String, String>, (f64, f64)),
 }
 
 /// Keys, independent of the terminal or browser that produced them.
@@ -219,6 +222,9 @@ pub struct App {
     pub computing: bool,
     pub catalog: Vec<SatInfo>,
     tle_fetch: Option<TleFetch>,
+    pub clouds: Option<Clouds>,
+    /// Coordinates of the cloud forecast being downloaded.
+    clouds_pending: Option<(f64, f64)>,
     /// The elements in use, to rebuild the fleet when the catalog changes.
     tle_raw: Vec<Raw>,
     pub tle_source: Source,
@@ -262,6 +268,8 @@ impl App {
             tle_raw: set.raw.clone(),
             catalog,
             tle_fetch: None,
+            clouds: None,
+            clouds_pending: None,
             slices: None,
             globe: Globe { center: Center::Aoi, lat: observer.lat, lon: observer.lon, zoom: 1.0, spin: false, flat: false },
             observer,
@@ -356,6 +364,33 @@ impl App {
         for group in tle::GROUPS {
             self.get(tle::group_url(group), Msg::Tle);
         }
+    }
+
+    /// Downloads are in flight.
+    pub fn busy(&self) -> bool {
+        self.refreshing || self.clouds_pending.is_some()
+    }
+
+    /// Keeps the cloud forecast for the AOI current.
+    fn refresh_clouds(&mut self) {
+        let at = (self.observer.lat, self.observer.lon);
+        let current = self.clouds.as_ref().is_some_and(|c| !c.is_stale(at));
+        if self.settings.offline || current || self.clouds_pending == Some(at) {
+            return;
+        }
+        if self.clouds.as_ref().is_some_and(|c| c.at != at) {
+            self.clouds = None;
+        }
+        self.clouds_pending = Some(at);
+        let tx = self.tx.clone();
+        platform::get(clouds::url(at.0, at.1), move |body| {
+            tx.send(Msg::Clouds(body, at)).ok();
+        });
+    }
+
+    /// Forecast cloud cover (%) at the AOI at `t`.
+    pub fn cloud_at(&self, t: DateTime<Utc>) -> Option<f64> {
+        self.clouds.as_ref()?.at(t)
     }
 
     /// Downloads elements only for catalog satellites that have none.
@@ -509,6 +544,14 @@ impl App {
                     }
                 }
                 Msg::GeoJson(Err(e)) => self.set_status(format!("GeoJSON download failed: {e}")),
+                Msg::Clouds(body, at) if self.clouds_pending == Some(at) => {
+                    self.clouds_pending = None;
+                    match body.and_then(|t| clouds::parse(&t, at)) {
+                        Ok(c) => self.clouds = Some(c),
+                        Err(e) => self.set_status(format!("Cloud forecast unavailable: {e}")),
+                    }
+                }
+                Msg::Clouds(..) => {}
             }
         }
 
@@ -519,6 +562,8 @@ impl App {
             self.slices = None;
             self.computing = false;
         }
+
+        self.refresh_clouds();
 
         let now = self.clock.now();
         let stale = match self.window {

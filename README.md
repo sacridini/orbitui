@@ -104,6 +104,9 @@ blocks and 16 colours. Force a mode with `--marker braille|halfblock|dot` and
   centred on the track; Sentinel-1 is right-looking, its IW swath 340–620 km to
   the right of the track.
 - Optical opportunities need the Sun above the horizon at the AOI.
+- The cloud cover forecast at the AOI (hourly, 16 days) comes from
+  [Open-Meteo](https://open-meteo.com): a `☁` row on the timeline and a
+  `CLOUD` column in the agenda. `--offline` turns it off.
 - Predicted horizon passes agree with [Skyfield](https://rhodesmill.org/skyfield/)
   to within a second and 0.1° of elevation (see `predict::tests`).
 
@@ -174,10 +177,11 @@ color = "#ff8800"       # or a colour name
 - Coastlines: [Natural Earth](https://www.naturalearthdata.com) 1:110m and
   1:50m, public domain, converted by `tools/build_coastlines.py`.
 - Orbital elements: Celestrak GP data.
+- Cloud forecast: weather data by [Open-Meteo.com](https://open-meteo.com)
+  (CC BY 4.0).
 
 ## Ideas
 
 - mission acquisition plans (Sentinel-2/1 KML, Landsat WRS-2)
-- cloud cover forecast on the timeline
 - export the agenda to iCalendar or CSV
 - mouse: drag to rotate, click to select

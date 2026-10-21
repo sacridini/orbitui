@@ -7,7 +7,7 @@ use chrono::{DateTime, Duration, Local, Timelike, Utc};
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 
-const LABEL: usize = 7;
+const LABEL: usize = 8;
 
 fn window(app: &App) -> (DateTime<Utc>, Duration) {
     let span = Duration::hours(app.timeline_hours);
@@ -36,7 +36,18 @@ fn rows(app: &App) -> Vec<usize> {
 
 /// Height the timeline wants, borders included.
 pub fn height(app: &App) -> u16 {
-    rows(app).len() as u16 + 4
+    rows(app).len() as u16 + 4 + u16::from(app.clouds.is_some())
+}
+
+/// Shade for a cloud cover percentage.
+fn cloud_glyph(v: f64) -> char {
+    match v {
+        v if v < 10.0 => '·',
+        v if v < 35.0 => '░',
+        v if v < 65.0 => '▒',
+        v if v < 90.0 => '▓',
+        _ => '█',
+    }
 }
 
 pub fn render(f: &mut Frame, area: Rect, app: &App, theme: &Theme, selected: Option<(usize, DateTime<Utc>)>) {
@@ -128,8 +139,17 @@ pub fn render(f: &mut Frame, area: Rect, app: &App, theme: &Theme, selected: Opt
 
     let mut lines = vec![finish(&" ".repeat(LABEL), Style::new(), header, None, theme)];
     lines.push(finish(&format!("{:<LABEL$}", "☼ sun"), Style::new().fg(theme.sun), sun, now_col.try_into().ok(), theme));
+    if app.clouds.is_some() {
+        let mut cloud = base_row();
+        for (c, cell) in cloud.iter_mut().enumerate() {
+            if let Some(v) = app.cloud_at(t0 + Duration::seconds(((c as f64 + 0.5) * dt) as i64)) {
+                *cell = (cloud_glyph(v), Style::new().fg(theme.cloud));
+            }
+        }
+        lines.push(finish(&format!("{:<LABEL$}", "☁ cloud"), Style::new().fg(theme.cloud), cloud, now_col.try_into().ok(), theme));
+    }
 
-    for i in rows(app).into_iter().take(inner.height.saturating_sub(2) as usize) {
+    for i in rows(app).into_iter().take((inner.height as usize).saturating_sub(lines.len())) {
         let info = &app.sats[i].info;
         let mut row = base_row();
         if let Some(fc) = &app.forecast {
@@ -180,7 +200,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &App, theme: &Theme, selected: Opt
 fn finish(label: &str, label_style: Style, mut cells: Vec<(char, Style)>, now: Option<usize>, theme: &Theme) -> Line<'static> {
     if let Some(c) = now
         && let Some(cell) = cells.get_mut(c)
-        && matches!(cell.0, '·' | '┊' | '─' | '━')
+        && matches!(cell.0, '·' | '┊' | '─' | '━' | '░' | '▒' | '▓' | '█')
+        && cell.1.fg != Some(theme.aoi)
     {
         *cell = ('│', Style::new().fg(theme.now));
     }
