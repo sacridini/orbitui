@@ -1,0 +1,32 @@
+[package]
+name = "orbitui"
+version = "0.1.0"
+edition = "2024"
+description = "Terminal planner of Earth observation satellite overpasses and imaging opportunities"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/sacridini/orbitui"
+homepage = "https://sacridini.github.io/orbitui/"
+keywords = ["satellite", "remote-sensing", "tui", "sgp4", "orbit"]
+categories = ["command-line-utilities", "science::geo"]
+
+[dependencies]
+anyhow = "1"
+chrono = "0.4"
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.28"
+directories = "5"
+ratatui = "0.29"
+sgp4 = "2"
+ureq = "2"
+
+# Propagation runs ~10^6 times per forecast: keep debug builds usable.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+strip = true

@@ -1,0 +1,123 @@
+# orbitui
+
+**When will a satellite image my area?** `orbitui` is a terminal planner of Earth
+observation overpasses. It propagates the orbits of Sentinel, Landsat, CBERS,
+MODIS, VIIRS and other missions, and tells you when your area of interest falls
+inside each sensor's swath, with the viewing geometry and the Sun at the time.
+
+Generic pass predictors answer "when is the satellite above my horizon".
+`orbitui` answers the remote sensing question: is the target *inside the imaged
+strip*, how far off-nadir, ascending or descending, and is it daylight for an
+optical sensor.
+
+Pure Rust, one binary, runs in Windows Terminal, PowerShell, CMD, bash, zsh,
+over SSH.
+
+## Screens
+
+**Monitor** (`1`): a live globe (or flat map, `m`) with the day/night
+terminator, coastlines lit by the Sun, every satellite in its true position,
+and for the selected one its ground track, swath edges and visibility circle.
+Beside it, the fleet with live positions and the time to each satellite's next
+image of your area.
+
+**Agenda** (`2`): a timeline of the coming hours with daylight at the AOI, the
+list of imaging opportunities (or horizon passes, `v`), and for the selected
+event a local footprint map of the swath over your area, a polar sky plot of
+the pass and the full geometry.
+
+Time can be paused, sped up ×21600 or reversed (`[` `]`), so you can watch a
+whole repeat cycle unfold.
+
+## Install
+
+```sh
+cargo install --path .
+```
+
+## Use
+
+```sh
+orbitui --lat -3.10 --lon -60.02 --name Manaus # remembered for the next runs
+orbitui                                        # last AOI (Brasília by default)
+orbitui --days 10 --map                        # longer forecast, start on the map
+orbitui --time 2027-01-15T12:00:00Z            # plan for another date
+orbitui --list --days 7                        # print the forecast and exit
+orbitui --fetch                                # refresh orbital elements and exit
+```
+
+Press `e` inside the app to change the area of interest and `?` for all keys.
+
+| Key | Action |
+| --- | --- |
+| `tab` `1` `2` | monitor / agenda |
+| `↑` `↓` | select satellite or event |
+| `m` | globe / flat map |
+| `c` | centre the globe on the AOI, the satellite, or free |
+| `←` `→` `w` `s` | rotate the globe; `o` spins it; `+` `-` zoom |
+| `[` `]` | time warp; `space` pauses; `,` `.` jump an hour; `0` back to now |
+| `v` | imaging opportunities / horizon passes |
+| `n` | include night-time optical overflights |
+| `f` | only the selected satellite |
+| `z` | timeline span 12 / 24 / 48 / 72 h |
+| `u` | local time / UTC |
+| `e` | set the area of interest |
+| `r` | download fresh elements |
+
+### Terminals
+
+Plots use braille characters (2×4 dots per cell). The classic Windows console
+host has no braille in its fonts; `orbitui` detects it and falls back to half
+blocks and 16 colours. Force a mode with `--marker braille|halfblock|dot` and
+`--compat`.
+
+## How it works
+
+- Orbital elements come from [Celestrak](https://celestrak.org) and are cached
+  for 12 hours; a snapshot ships in the binary so the first run works offline.
+- Orbits are propagated with SGP4 ([`sgp4`](https://crates.io/crates/sgp4)),
+  rotated to the Earth-fixed frame with GMST and converted to WGS84.
+- Each satellite is sampled every 20 s over the forecast window. Closest
+  approaches to the AOI and horizon crossings found on the grid are refined to
+  half a second (golden section and bisection).
+- An **imaging opportunity** is a closest approach where the AOI's signed
+  cross-track distance lies between the swath edges. Nadir-looking sensors are
+  centred on the track; Sentinel-1 is right-looking, its IW swath 340–620 km to
+  the right of the track.
+- Optical opportunities need the Sun above the horizon at the AOI.
+- Predicted horizon passes agree with [Skyfield](https://rhodesmill.org/skyfield/)
+  to within a second and 0.1° of elevation (see `predict::tests`).
+
+Opportunities are geometric. Whether a mission actually acquires depends on its
+observation plan (Sentinel-2 images land only, Landsat follows the WRS-2
+schedule, Sentinel-1 alternates modes) and on clouds.
+
+## Satellites
+
+| Mission | Sensor | Swath |
+| --- | --- | --- |
+| Sentinel-2A/B/C | MSI | 290 km |
+| Landsat 8/9 | OLI | 185 km |
+| Sentinel-1A/C/D | C-SAR IW | 250 km, right-looking |
+| Sentinel-3A/B | OLCI | 1270 km |
+| CBERS-4 / 4A, Amazonia-1 | WFI | 866 / 684 / 850 km |
+| Terra, Aqua | MODIS | 2330 km |
+| Suomi NPP, NOAA-20/21 | VIIRS | 3060 km |
+| ISS | (tracked only) | |
+
+The list lives in `src/catalog.rs`.
+
+## Data
+
+- Coastlines: [Natural Earth](https://www.naturalearthdata.com) 1:110m and
+  1:50m, public domain, converted by `tools/build_coastlines.py`.
+- Orbital elements: Celestrak GP data.
+
+## Ideas
+
+- AOI as a polygon (GeoJSON/KML) instead of a point
+- user-defined satellites and sensors in a config file
+- mission acquisition plans (Sentinel-2/1 KML, Landsat WRS-2)
+- cloud cover forecast on the timeline
+- export the agenda to iCalendar or CSV
+- mouse: drag to rotate, click to select
