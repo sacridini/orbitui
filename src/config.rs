@@ -1,9 +1,11 @@
 //! The last area of interest, remembered between sessions.
 
+use crate::aoi::{self, Shape};
 use crate::orbit::Observer;
 use crate::platform;
 
 const KEY: &str = "aoi.txt";
+const AREA_KEY: &str = "aoi.geojson";
 
 /// Brasília, until the user picks an area.
 pub fn default_observer() -> Observer {
@@ -22,6 +24,11 @@ pub fn load() -> Option<Observer> {
             "lat" => lat = value.parse().ok(),
             "lon" => lon = value.parse().ok(),
             "alt_m" => alt = value.parse().unwrap_or(0.0),
+            "area" if value == AREA_KEY => {
+                if let Some(Ok((Shape::Area(area), _))) = platform::load(AREA_KEY).map(|t| aoi::parse_geojson(&t)) {
+                    return Some(Observer::with_area(name, area));
+                }
+            }
             _ => {}
         }
     }
@@ -29,14 +36,24 @@ pub fn load() -> Option<Observer> {
 }
 
 pub fn save(obs: &Observer) {
-    let text = format!(
+    let mut text = format!(
         "name = {}\nlat = {}\nlon = {}\nalt_m = {}\n",
         obs.name,
         obs.lat,
         obs.lon,
         obs.alt_km * 1000.0
     );
+    if let Some(area) = &obs.area {
+        platform::save(AREA_KEY, &area.to_geojson());
+        text.push_str(&format!("area = {AREA_KEY}\n"));
+    }
     platform::save(KEY, &text);
+}
+
+/// "data/Manaus.geojson" gives "Manaus".
+pub fn file_stem(path: &str) -> String {
+    let file = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    file.rsplit_once('.').map_or(file, |(stem, _)| stem).to_string()
 }
 
 /// Parses "lat, lon[, name]" or "lat lon [name]".
@@ -61,5 +78,7 @@ mod tests {
         assert_eq!(parse_aoi("-3.1 -60.0 Manaus AM"), Some((-3.1, -60.0, "Manaus AM".into())));
         assert_eq!(parse_aoi("95, 10"), None);
         assert_eq!(parse_aoi("abc"), None);
+        assert_eq!(super::file_stem("C:\\data\\Manaus.geojson"), "Manaus");
+        assert_eq!(super::file_stem("aoi/area.json"), "area");
     }
 }

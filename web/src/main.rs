@@ -2,7 +2,8 @@
 //!
 //! The URL can set the area of interest and the opening screen, so that a
 //! forecast can be shared: `?lat=-3.10&lon=-60.02&name=Manaus&view=agenda`
-//! (also `map=1` and `days=7`).
+//! (also `map=1`, `days=7` and `geojson=<url>`). GeoJSON files dropped on
+//! the page become the area of interest.
 
 use orbitui::app::{App, KeyCode, KeyEvent, Settings, View};
 use orbitui::orbit::Observer;
@@ -15,6 +16,8 @@ use ratzilla::ratatui::symbols::Marker;
 use ratzilla::{CanvasBackend, FontAtlasConfig, WebEventHandler, WebGl2Backend, WebRenderer};
 use std::cell::RefCell;
 use std::rc::Rc;
+use wasm_bindgen::JsCast;
+use wasm_bindgen::closure::Closure;
 
 /// Monospace fonts with braille glyphs, in order of preference; the browser
 /// falls back to its own monospace font.
@@ -30,7 +33,11 @@ fn main() {
         app.view = View::Agenda;
     }
     app.globe.flat = param(&params, "map").is_some_and(|v| v == "1");
+    if let Some(url) = param(&params, "geojson") {
+        app.fetch_geojson(url);
+    }
     let app = Rc::new(RefCell::new(app));
+    accept_dropped_files(&app);
 
     // The page's CSS sizes the canvas to the window; the backend follows it.
     let options = WebGl2BackendOptions::new()
@@ -80,6 +87,35 @@ fn convert(key: ratzilla::event::KeyEvent) -> Option<KeyEvent> {
         _ => return None,
     };
     Some(KeyEvent { code, ctrl: key.ctrl })
+}
+
+/// Files dropped on the page: GeoJSON becomes the area of interest.
+fn accept_dropped_files(app: &Rc<RefCell<App>>) {
+    let Some(window) = web_sys::window() else { return };
+    let over = Closure::<dyn FnMut(web_sys::DragEvent)>::new(|e: web_sys::DragEvent| e.prevent_default());
+    window.add_event_listener_with_callback("dragover", over.as_ref().unchecked_ref()).ok();
+    over.forget();
+
+    let app = Rc::clone(app);
+    let drop = Closure::<dyn FnMut(web_sys::DragEvent)>::new(move |e: web_sys::DragEvent| {
+        e.prevent_default();
+        let Some(files) = e.data_transfer().and_then(|d| d.files()) else { return };
+        for i in 0..files.length() {
+            let Some(file) = files.get(i) else { continue };
+            let app = Rc::clone(&app);
+            wasm_bindgen_futures::spawn_local(async move {
+                let name = file.name();
+                let Ok(text) = wasm_bindgen_futures::JsFuture::from(file.text()).await else { return };
+                let text = text.as_string().unwrap_or_default();
+                let mut app = app.borrow_mut();
+                if let Err(e) = app.set_geojson(&text, &config::file_stem(&name)) {
+                    app.set_status(format!("{name}: {e}"));
+                }
+            });
+        }
+    });
+    window.add_event_listener_with_callback("drop", drop.as_ref().unchecked_ref()).ok();
+    drop.forget();
 }
 
 fn query() -> Option<web_sys::UrlSearchParams> {

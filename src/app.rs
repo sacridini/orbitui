@@ -1,5 +1,6 @@
 //! Application state, background work and key handling.
 
+use crate::aoi::{self, Shape};
 use crate::catalog::{self, SatInfo};
 use crate::coast::World;
 use crate::config;
@@ -19,6 +20,8 @@ pub enum Msg {
     Forecast { job: u64, forecast: Forecast },
     /// One Celestrak response of the download in progress.
     Tle(Result<String, String>),
+    /// A GeoJSON area of interest fetched from a URL.
+    GeoJson(Result<String, String>),
 }
 
 /// Keys, independent of the terminal or browser that produced them.
@@ -500,6 +503,12 @@ impl App {
                 }
                 Msg::Forecast { .. } => {}
                 Msg::Tle(body) => self.on_tle_response(body),
+                Msg::GeoJson(Ok(text)) => {
+                    if let Err(e) = self.set_geojson(&text, "AOI") {
+                        self.set_status(e);
+                    }
+                }
+                Msg::GeoJson(Err(e)) => self.set_status(format!("GeoJSON download failed: {e}")),
             }
         }
 
@@ -600,9 +609,29 @@ impl App {
         }
     }
 
-    fn set_observer(&mut self, obs: Observer) {
+    /// Sets the AOI from a GeoJSON document: its polygons, or its point.
+    pub fn set_geojson(&mut self, text: &str, fallback_name: &str) -> Result<(), String> {
+        let (shape, name) = aoi::parse_geojson(text)?;
+        let name = name.unwrap_or_else(|| fallback_name.to_string());
+        self.set_observer(match shape {
+            Shape::Area(area) => Observer::with_area(name, area),
+            Shape::Point(lat, lon) => Observer::new(name, lat, lon, 0.0),
+        });
+        Ok(())
+    }
+
+    /// Fetches a GeoJSON area of interest (it must allow CORS in the browser).
+    pub fn fetch_geojson(&mut self, url: String) {
+        self.set_status("Downloading the area of interest…");
+        self.get(url, Msg::GeoJson);
+    }
+
+    pub fn set_observer(&mut self, obs: Observer) {
         config::save(&obs);
-        self.set_status(format!("AOI set to {} ({})", obs.name, obs.coords()));
+        match &obs.area {
+            Some(area) => self.set_status(format!("AOI set to {} ({:.0} km²)", obs.name, area.area_km2)),
+            None => self.set_status(format!("AOI set to {} ({})", obs.name, obs.coords())),
+        }
         self.observer = obs;
         self.selected_event = None;
         self.forecast = None;
@@ -625,7 +654,13 @@ impl App {
                                 self.set_observer(Observer::new(name, lat, lon, 0.0));
                                 Ok(())
                             }
-                            None => Err("Expected: lat, lon [name]  e.g.  -3.10, -60.02 Manaus".to_string()),
+                            None if text.trim().starts_with("http") => {
+                                self.fetch_geojson(text.trim().to_string());
+                                Ok(())
+                            }
+                            None if text.trim().to_lowercase().ends_with("json") => platform::read_file(text.trim())
+                                .and_then(|t| self.set_geojson(&t, &config::file_stem(text.trim()))),
+                            None => Err("Expected: lat, lon [name], a GeoJSON file or URL".to_string()),
                         },
                         PromptKind::AddSatellite => self.add_satellite(&text),
                     };

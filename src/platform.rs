@@ -47,6 +47,10 @@ mod imp {
         std::fs::write(path, value).ok();
     }
 
+    pub fn read_file(path: &str) -> Result<String, String> {
+        std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))
+    }
+
     /// Writes a file for the user in the working directory.
     pub fn deliver(name: &str, content: &str) -> Result<String, String> {
         std::fs::write(name, content).map_err(|e| format!("{name}: {e}"))?;
@@ -96,6 +100,10 @@ mod imp {
             // Quota errors only cost us the cache.
             s.set_item(&format!("orbitui.{key}"), value).ok();
         }
+    }
+
+    pub fn read_file(_path: &str) -> Result<String, String> {
+        Err("drop the GeoJSON file on the page instead".into())
     }
 
     /// Hands a file to the user as a browser download.

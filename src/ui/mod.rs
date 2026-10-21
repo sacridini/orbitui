@@ -163,7 +163,13 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         Span::raw("  "),
         Span::styled("♦ ", Style::new().fg(theme.aoi)),
         Span::styled(app.observer.name.clone(), Style::new().fg(theme.aoi).add_modifier(Modifier::BOLD)),
-        Span::styled(format!(" {}", app.observer.coords()), Style::new().fg(theme.dim)),
+        Span::styled(
+            match &app.observer.area {
+                Some(area) => format!(" ▱ {:.0} km² around {}", area.area_km2, app.observer.coords()),
+                None => format!(" {}", app.observer.coords()),
+            },
+            Style::new().fg(theme.dim),
+        ),
         sep(),
         Span::styled(now.format("%Y-%m-%d %H:%M:%S").to_string(), Style::new().fg(theme.text).add_modifier(Modifier::BOLD)),
         Span::styled(" UTC", Style::new().fg(theme.dim)),
@@ -401,6 +407,7 @@ fn owned(e: &Event, app_lon: f64) -> Selected {
             to: a.time + Duration::minutes(12),
             lines: vec![
                 ("cross-track".into(), format!("{:.1} km {}", a.cross_km.abs(), if a.cross_km >= 0.0 { "right" } else { "left" })),
+                ("AOI covered".into(), format!("{:.0}%", a.coverage * 100.0)),
                 ("off-nadir".into(), format!("{:.1}°", a.off_nadir)),
                 ("seen at".into(), format!("az {:.0}°  el {:.1}°", a.azimuth, a.elevation)),
                 ("direction".into(), if a.ascending { "↑ ascending".into() } else { "↓ descending".into() }),
@@ -432,6 +439,17 @@ fn solar_time(t: DateTime<Utc>, lon: f64) -> String {
     format!("{:02}:{:02} at AOI", minutes / 60, minutes % 60)
 }
 
+fn coverage_span(coverage: f64, theme: &Theme) -> Span<'static> {
+    let color = if coverage >= 0.95 {
+        theme.good
+    } else if coverage >= 0.5 {
+        theme.text
+    } else {
+        theme.warn
+    };
+    Span::styled(format!("{:>4.0}%", coverage * 100.0), Style::new().fg(color))
+}
+
 fn light_span(light: Light, sun_el: f64, theme: &Theme) -> Span<'static> {
     match light {
         Light::Day => Span::styled(format!("☼{sun_el:>3.0}°"), Style::new().fg(theme.sun)),
@@ -457,7 +475,7 @@ fn draw_events(f: &mut Frame, area: Rect, app: &mut App, theme: &Theme) {
                 let row = match e {
                     Event::Acq(a) => {
                         let kind = app.sats[a.sat].info.kind;
-                        Row::new(vec![
+                        let mut cells = vec![
                             sat_cell(a.sat),
                             Cell::from(date(a.time)),
                             Cell::from(time(a.time)),
@@ -466,7 +484,11 @@ fn draw_events(f: &mut Frame, area: Rect, app: &mut App, theme: &Theme) {
                             Cell::from(format!("{:>4.0} {}", a.cross_km.abs(), if a.cross_km >= 0.0 { "R" } else { "L" })),
                             Cell::from(format!("{:>4.1}°", a.off_nadir)),
                             Cell::from(if kind == Kind::Sar { Span::styled("SAR", Style::new().fg(theme.dim)) } else { light_span(a.light(), a.sun_el, theme) }),
-                        ])
+                        ];
+                        if app.observer.area.is_some() {
+                            cells.push(Cell::from(coverage_span(a.coverage, theme)));
+                        }
+                        Row::new(cells)
                     }
                     Event::Pass(p) => Row::new(vec![
                         sat_cell(p.sat),
@@ -483,19 +505,13 @@ fn draw_events(f: &mut Frame, area: Rect, app: &mut App, theme: &Theme) {
             })
             .collect();
         let (header, widths): (Vec<&str>, Vec<Constraint>) = match app.list {
-            EventList::Acquisitions => (
-                vec!["SATELLITE", "DATE", "TIME", "IN", "", "X-TRACK", "OFF-NAD", "SUN"],
-                vec![
-                    Constraint::Length(12),
-                    Constraint::Length(10),
-                    Constraint::Length(8),
-                    Constraint::Length(7),
-                    Constraint::Length(1),
-                    Constraint::Length(7),
-                    Constraint::Length(7),
-                    Constraint::Length(5),
-                ],
-            ),
+            EventList::Acquisitions => {
+                let mut columns = vec![("SATELLITE", 12), ("DATE", 10), ("TIME", 8), ("IN", 7), ("", 1), ("X-TRACK", 7), ("OFF-NAD", 7), ("SUN", 5)];
+                if app.observer.area.is_some() {
+                    columns.push(("COVER", 5));
+                }
+                columns.into_iter().map(|(h, w)| (h, Constraint::Length(w))).unzip()
+            }
             EventList::Passes => (
                 vec!["SATELLITE", "DATE", "AOS", "IN", "MAX", "AZIMUTH", "DUR", "LOS"],
                 vec![
@@ -569,7 +585,14 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
 fn draw_input(f: &mut Frame, app: &App, theme: &Theme) {
     let Some(prompt) = &app.prompt else { return };
     let (title, help, example) = match prompt.kind {
-        PromptKind::Aoi => ("area of interest", "Latitude, longitude and an optional name", "-3.10, -60.02 Manaus"),
+        PromptKind::Aoi if crate::platform::THREADS => {
+            ("area of interest", "Latitude, longitude and a name, or a GeoJSON file or URL", "-3.10, -60.02 Manaus   ·   area.geojson")
+        }
+        PromptKind::Aoi => (
+            "area of interest",
+            "Latitude, longitude and a name, or a GeoJSON URL (or drop a file on the page)",
+            "-3.10, -60.02 Manaus",
+        ),
         PromptKind::AddSatellite => (
             "add satellite",
             "NORAD id, then optional swath (km or near..far), kind and name",

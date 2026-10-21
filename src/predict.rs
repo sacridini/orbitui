@@ -27,6 +27,8 @@ pub struct Acquisition {
     pub azimuth: f64,
     pub sun_el: f64,
     pub ascending: bool,
+    /// Share of the area of interest inside the swath (1 for a point).
+    pub coverage: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -218,7 +220,11 @@ fn acquisition(i: usize, sat: &Sat, obs: &Observer, t: DateTime<Utc>) -> Option<
     let to_aoi = astro::bearing(st.geo.lat, st.geo.lon, obs.lat, obs.lon);
     let side = if (to_aoi - track).rem_euclid(360.0) < 180.0 { 1.0 } else { -1.0 };
     let cross_km = side * angle * MEAN_RADIUS_KM;
-    if !sat.info.covers(cross_km) {
+    let coverage = match &obs.area {
+        Some(area) => area.coverage(st.geo.lat, st.geo.lon, track, sat.info.near_km, sat.info.far_km),
+        None => f64::from(u8::from(sat.info.covers(cross_km))),
+    };
+    if coverage <= 0.0 {
         return None;
     }
     let look = obs.look(st.ecef);
@@ -231,6 +237,7 @@ fn acquisition(i: usize, sat: &Sat, obs: &Observer, t: DateTime<Utc>) -> Option<
         azimuth: look.az,
         sun_el: astro::sun_elevation(obs.lat, obs.lon, astro::subsolar_point(t)),
         ascending: st.ascending,
+        coverage,
     })
 }
 

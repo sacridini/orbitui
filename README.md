@@ -39,7 +39,7 @@ Or open the web version, the same app compiled to WebAssembly:
 <https://sacridini.github.io/orbitui/>. The URL takes the area of interest
 and the opening screen, so a forecast can be shared:
 <https://sacridini.github.io/orbitui/?lat=-3.10&lon=-60.02&name=Manaus&view=agenda>
-(also `map=1` and `days=7`).
+(also `map=1`, `days=7` and `geojson=<url>`).
 
 ## Use
 
@@ -50,7 +50,19 @@ orbitui --days 10 --map                        # longer forecast, start on the m
 orbitui --time 2027-01-15T12:00:00Z            # plan for another date
 orbitui --list --days 7                        # print the forecast and exit
 orbitui --fetch                                # refresh orbital elements and exit
+orbitui --aoi parcel.geojson                   # a polygon as area of interest
 ```
+
+### Areas as polygons
+
+The area of interest can be a polygon (GeoJSON `Polygon`, `MultiPolygon`,
+`Feature` or `FeatureCollection`; holes are honoured). It is sampled on a grid,
+and each overflight reports the share of the area inside the swath (`COVER`),
+computed from each sample's cross-track distance to the ground track. Give it
+with `--aoi file.geojson`, type a file path or URL after pressing `e`, or, on
+the web, drop the file on the page or pass `?geojson=<url>`, e.g. a Brazilian
+state from IBGE:
+<https://sacridini.github.io/orbitui/?geojson=https%3A%2F%2Fservicodados.ibge.gov.br%2Fapi%2Fv3%2Fmalhas%2Festados%2F53%3Fformato%3Dapplication%2Fvnd.geo%252Bjson>
 
 Press `e` inside the app to change the area of interest and `?` for all keys.
 
@@ -165,7 +177,6 @@ color = "#ff8800"       # or a colour name
 
 ## Ideas
 
-- AOI as a polygon (GeoJSON/KML) instead of a point
 - mission acquisition plans (Sentinel-2/1 KML, Landsat WRS-2)
 - cloud cover forecast on the timeline
 - export the agenda to iCalendar or CSV

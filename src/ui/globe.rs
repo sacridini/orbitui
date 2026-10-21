@@ -224,6 +224,13 @@ fn paint_globe(ctx: &mut Context, plane: &Plane, app: &App, scene: &Scene, theme
     }
     ctx.layer();
 
+    if let Some(area) = &app.observer.area {
+        for ring in &area.rings {
+            plane.polyline(ctx, ring.iter().chain(ring.first()).map(|&p| view.surface_ll(p)), theme.aoi, false);
+        }
+    }
+    ctx.layer();
+
     // Markers last, so they sit on top.
     if let Some((x, y)) = view.surface_ll(scene.subsolar) {
         ctx.print(x, y, Span::styled("☼", Style::new().fg(theme.sun)));
@@ -304,6 +311,14 @@ fn paint_map(ctx: &mut Context, plane: &Plane, app: &App, scene: &Scene, theme: 
         plane.polyline(ctx, wrapped(&scene.future), sat.info.color, false);
         for edge in &scene.edges {
             plane.polyline(ctx, wrapped(edge), sat.info.color, true);
+        }
+    }
+    ctx.layer();
+
+    if let Some(area) = &app.observer.area {
+        for ring in &area.rings {
+            let closed: Vec<(f64, f64)> = ring.iter().chain(ring.first()).copied().collect();
+            plane.polyline(ctx, wrapped(&closed), theme.aoi, false);
         }
     }
     ctx.layer();

@@ -31,6 +31,9 @@ struct Cli {
     /// Longitude of the area of interest in degrees (west is negative)
     #[arg(long, allow_negative_numbers = true, requires = "lat")]
     lon: Option<f64>,
+    /// Area of interest from a GeoJSON file (polygons, or a point)
+    #[arg(long, conflicts_with_all = ["lat", "lon"])]
+    aoi: Option<String>,
     /// Name shown for the area of interest
     #[arg(long)]
     name: Option<String>,
@@ -114,6 +117,11 @@ fn main() -> Result<()> {
     let settings = Settings { days: cli.days, min_el: cli.min_elev, offline };
     let mut app = App::new(observer, settings, marker, compat);
     app.globe.flat = cli.map;
+    if let Some(path) = &cli.aoi {
+        let text = platform::read_file(path).map_err(anyhow::Error::msg)?;
+        let name = cli.name.clone().unwrap_or_else(|| config::file_stem(path));
+        app.set_geojson(&text, &name).map_err(|e| anyhow::anyhow!("{path}: {e}"))?;
+    }
     if let Some(t) = cli.time {
         app.clock = app::Clock::starting_at(t);
     }
@@ -239,20 +247,21 @@ fn print_forecast(app: &mut App) {
     println!("# {} ({}), from {} UTC", app.observer.name, app.observer.coords(), now.format("%Y-%m-%d %H:%M"));
     println!("
 # imaging opportunities");
-    println!("{:<12} {:<19} {:>4} {:>9} {:>8} {:>6}", "satellite", "time_utc", "dir", "xtrack_km", "offnadir", "sun_el");
+    println!("{:<12} {:<19} {:>4} {:>9} {:>8} {:>6} {:>6}", "satellite", "time_utc", "dir", "xtrack_km", "offnadir", "sun_el", "cover");
     for a in fc.acquisitions.iter().filter(|a| a.time >= now) {
         let sat = &app.sats[a.sat];
         if !a.usable(sat.info.kind) {
             continue;
         }
         println!(
-            "{:<12} {:<19} {:>4} {:>9.1} {:>8.1} {:>6.1}",
+            "{:<12} {:<19} {:>4} {:>9.1} {:>8.1} {:>6.1} {:>5.0}%",
             sat.info.name,
             a.time.format("%Y-%m-%d %H:%M:%S"),
             if a.ascending { "asc" } else { "desc" },
             a.cross_km,
             a.off_nadir,
-            a.sun_el
+            a.sun_el,
+            a.coverage * 100.0
         );
     }
     println!("

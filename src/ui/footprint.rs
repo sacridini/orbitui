@@ -37,7 +37,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &App, theme: &Theme, sat: usize, t
     }
 
     // Extent: the swath, the AOI's offset and some margin, in km.
-    let reach = info.near_km.abs().max(info.far_km.abs()).max(cross.map_or(0.0, |c| c.0.abs()));
+    let area_reach = obs.area.as_ref().map_or(0.0, |a| {
+        a.rings.iter().flatten().map(|&(lat, lon)| astro::central_angle(lat, lon, obs.lat, obs.lon)).fold(0.0, f64::max)
+            * astro::MEAN_RADIUS_KM
+    });
+    let reach = info.near_km.abs().max(info.far_km.abs()).max(cross.map_or(0.0, |c| c.0.abs())).max(area_reach);
     let extent = (reach * 1.2 + 40.0).max(120.0);
     let plane = Plane::square(inner);
     let k = plane.half_min() / extent;
@@ -95,6 +99,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &App, theme: &Theme, sat: usize, t
         }
         ctx.layer();
 
+        if let Some(area) = &obs.area {
+            for ring in &area.rings {
+                plane.polyline(ctx, ring.iter().chain(ring.first()).map(|&p| Some(to(p))), theme.aoi, false);
+            }
+        }
         plane.polyline(ctx, track.iter().map(|&p| Some(to(p))), theme.track_past, true);
         for edge in &edges {
             plane.polyline(ctx, edge.iter().map(|&p| Some(to(p))), info.color, false);

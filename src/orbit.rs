@@ -1,9 +1,11 @@
 //! Satellites propagated with SGP4, and the observer on the ground.
 
+use crate::aoi::Area;
 use crate::astro::{self, Geodetic, Look, Vec3};
 use crate::catalog::SatInfo;
 use chrono::{DateTime, Duration, Utc};
 use sgp4::{Constants, Elements, MinutesSinceEpoch};
+use std::sync::Arc;
 
 pub struct Sat {
     pub info: SatInfo,
@@ -61,7 +63,8 @@ impl Sat {
     }
 }
 
-/// The area of interest, a point on the ground.
+/// The area of interest: a point on the ground, or a polygon whose centroid
+/// stands for it in look angles and Sun elevation.
 #[derive(Clone, Debug)]
 pub struct Observer {
     pub name: String,
@@ -69,6 +72,7 @@ pub struct Observer {
     pub lon: f64,
     pub alt_km: f64,
     pub ecef: Vec3,
+    pub area: Option<Arc<Area>>,
 }
 
 impl Observer {
@@ -80,7 +84,13 @@ impl Observer {
             lon,
             alt_km,
             ecef: astro::geodetic_to_ecef(lat, lon, alt_km),
+            area: None,
         }
+    }
+
+    pub fn with_area(name: impl Into<String>, area: Area) -> Self {
+        let (lat, lon) = area.centroid;
+        Observer { area: Some(Arc::new(area)), ..Observer::new(name, lat, lon, 0.0) }
     }
 
     pub fn look(&self, target: Vec3) -> Look {

@@ -4,6 +4,7 @@
 //! the ratatui interface. `src/main.rs` drives it in a terminal and `web/`
 //! in the browser.
 
+pub mod aoi;
 pub mod app;
 pub mod astro;
 pub mod catalog;
