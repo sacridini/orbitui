@@ -93,6 +93,7 @@ first. Names are looked up in the
 | `z` | timeline span 12 / 24 / 48 / 72 h |
 | `u` | local time / UTC |
 | `e` | set the area of interest |
+| `g` | satellite groups (radar, China, very high resolution…) |
 | `i` / `D` | add a satellite / remove the selected one |
 | `x` | export the agenda as CSV and iCalendar |
 | `P` | download ESA acquisition plans (Sentinel-1/2) |
@@ -148,22 +149,48 @@ and drop it on the page (keep ESA's file name: it tells which satellite).
 
 ## Satellites
 
-| Mission | Sensor | Swath |
-| --- | --- | --- |
-| Sentinel-2A/B/C | MSI | 290 km |
-| Landsat 8/9 | OLI | 185 km |
-| Sentinel-1A/C/D | C-SAR IW | 250 km, right-looking |
-| Sentinel-3A/B | OLCI | 1270 km |
-| CBERS-4 / 4A, Amazonia-1 | WFI | 866 / 684 / 850 km |
-| Terra, Aqua | MODIS | 2330 km |
-| Suomi NPP, NOAA-20/21 | VIIRS | 3060 km |
-| ISS | (tracked only) | |
+83 missions in groups; `g` switches groups on and off (`--groups sar,china`
+or `--groups all` on the command line, `?groups=` on the web). Groups marked
+★ are on by default.
+
+| Group | Missions |
+| --- | --- |
+| ★ Copernicus | Sentinel-1A/C/D (C-SAR IW, right-looking), Sentinel-2A/B/C (MSI), Sentinel-3A/B (OLCI), Sentinel-5P (TROPOMI) |
+| ★ Landsat | Landsat 8, 9 |
+| ★ CBERS & Amazonia | CBERS-4, CBERS-4A, Amazonia-1 (WFI) |
+| ★ MODIS & VIIRS | Terra, Aqua, Suomi NPP, NOAA-20, NOAA-21 |
+| ★ Hyperspectral | EnMAP (±30° tasking), PRISMA (±14.7°), Tanager-1/2, Gaofen-5 02, Gaofen-5 01A, ZY-1 02D/02E (AHSI) |
+| Radar | NISAR (left-looking), Biomass, ALOS-2, ALOS-4, SAOCOM 1A/1B, RCM-1/2/3, TerraSAR-X, TanDEM-X, PAZ, CSG-1/2/3, KOMPSAT-5, Gaofen-3 (×3), LuTan-1 A/B, HJ-2E/2F, EOS-04 |
+| China | Gaofen-1, -1 02/03/04, -2, -6, -7, ZY-3 02/03/04, HJ-2A/2B, plus the Chinese radars and hyperspectral imagers |
+| Very high resolution | Pléiades 1A/1B, Pléiades Neo 3/4, SPOT 6/7, WorldView-3, KOMPSAT-3/3A, Cartosat-3 |
+| Ocean, ice & atmosphere | PACE, GCOM-C, HY-1C/1D, Oceansat-3, ICESat-2 (lidar), SWOT |
+| India | Resourcesat-2/2A, Cartosat-3, EOS-04, Oceansat-3 |
+| ★ Stations | ISS (tracked only) |
+
+How each sensor reaches the ground:
+
+- **Nadir swaths** (Sentinel-2, Landsat, MODIS, Gaofen-1 WFV…): a strip of the
+  published width centred on the ground track.
+- **Tasked optics** (EnMAP, PRISMA, Tanager, Pléiades, WorldView…): the
+  satellite rolls to point its swath up to the published off-nadir limit
+  (±30° when only "agile" is published), so an opportunity means *it could be
+  tasked* to image the AOI on that pass; `OFF-NAD` is the roll it needs.
+- **Radars** see between two incidence angles to one side: Sentinel-1 right,
+  NISAR left, for every acquisition. Commercial and national radars (ALOS,
+  SAOCOM, TerraSAR-X, COSMO-SkyMed, Gaofen-3…) choose beam and side per
+  request: they are drawn with their field of regard (incidence ~20–50°,
+  either side). Biomass's look side is not published: either side is shown.
+
+The values are the missions' nominal specifications, rounded; edges in km
+follow from each satellite's actual altitude. Elements are fetched as OMM
+(JSON) records, which also carry six-digit catalog numbers (Tanager-2 is
+100886) that two-line elements cannot.
 
 ### Your own satellites
 
 Press `i` and type a NORAD id, optionally followed by the swath (a width in km,
 or `near..far` edges, positive to the right of the track), the kind (`optical`,
-`sar` or `station`) and a name:
+`sar`, `lidar` or `station`) and a name:
 
 ```text
 41240 0 Jason-3
@@ -180,7 +207,7 @@ The list is kept in `satellites.toml`, in the config directory
 and can be edited by hand:
 
 ```toml
-builtin = true          # keep the built-in missions (default)
+groups = ["copernicus", "landsat", "sar"]   # built-in groups shown
 exclude = [25544]       # built-in missions to hide, by NORAD id
 
 [[satellite]]
@@ -190,7 +217,10 @@ sensor = "PAN"
 swath_km = 120          # nadir-centred swath; 0 tracks without imaging
 near_km = 250           # or explicit edges, positive right of the track
 far_km = 480
-kind = "optical"        # optical | sar | station
+off_nadir = 30          # or: an agile sensor pointed up to 30° either side
+incidence = [20, 45]    # or: a radar between these incidence angles…
+side = "right"          # …looking right, left or both
+kind = "optical"        # optical | sar | lidar | station
 color = "#ff8800"       # or a colour name
 ```
 
@@ -208,7 +238,8 @@ color = "#ff8800"       # or a colour name
 
 - Coastlines: [Natural Earth](https://www.naturalearthdata.com) 1:110m and
   1:50m, public domain, converted by `tools/build_coastlines.py`.
-- Orbital elements: Celestrak GP data.
+- Orbital elements: Celestrak GP data (OMM); the bundled snapshot is rebuilt
+  with `tools/build_snapshot.py`.
 - Acquisition plans: ESA, Copernicus Sentinel missions.
 - Cloud forecast and place names: [Open-Meteo.com](https://open-meteo.com)
   (CC BY 4.0), with [GeoNames](https://www.geonames.org) for places.

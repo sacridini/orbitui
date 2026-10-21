@@ -11,7 +11,8 @@ use crate::orbit::{Observer, Sat};
 use crate::plan::{self, Plans};
 use crate::platform;
 use crate::predict::{self, Acquisition, Forecast, Pass};
-use crate::tle::{self, Raw, Source, TleSet};
+use crate::tle::{self, Source, TleSet};
+use sgp4::Elements;
 use chrono::{DateTime, Duration, Utc};
 use ratatui::symbols::Marker;
 use ratatui::widgets::TableState;
@@ -76,6 +77,13 @@ pub struct Prompt {
     pub text: String,
 }
 
+/// The satellite groups being switched on and off.
+pub struct GroupMenu {
+    pub choice: usize,
+    pub enabled: Vec<String>,
+    initial: Vec<String>,
+}
+
 /// Places matching a name, for the user to choose from.
 pub struct PlacePicker {
     pub query: String,
@@ -97,7 +105,7 @@ struct Search {
 struct TleFetch {
     pending: usize,
     by_id: bool,
-    found: Vec<Raw>,
+    found: Vec<Elements>,
 }
 
 /// Simulation time: real time, shifted, sped up or frozen.
@@ -258,13 +266,14 @@ pub struct App {
     /// Coordinates of the cloud forecast being downloaded.
     clouds_pending: Option<(f64, f64)>,
     /// The elements in use, to rebuild the fleet when the catalog changes.
-    tle_raw: Vec<Raw>,
+    tle_raw: Vec<Elements>,
     pub tle_source: Source,
     pub tle_fetched: Option<DateTime<Utc>>,
     pub refreshing: bool,
     status: Option<(String, Instant)>,
     pub prompt: Option<Prompt>,
     pub picker: Option<PlacePicker>,
+    pub group_menu: Option<GroupMenu>,
     search: Option<Search>,
     pub help: bool,
     pub marker: Marker,
@@ -276,18 +285,19 @@ pub struct App {
     pub quit: bool,
 }
 
-fn build_sats(raw: &[Raw], catalog: &[SatInfo]) -> Vec<Sat> {
+fn build_sats(elements: &[Elements], catalog: &[SatInfo]) -> Vec<Sat> {
     catalog
         .iter()
         .filter_map(|info| {
-            let r = raw.iter().find(|r| r.norad() == Some(info.norad))?;
+            let e = elements.iter().find(|e| e.norad_id == info.norad)?;
             let mut info = *info;
             if info.name.is_empty() {
-                // Unnamed user satellite: take the TLE's name.
-                info.name = Box::leak(r.name.clone().into_boxed_str());
-                info.short = Box::leak(catalog::short_label(&r.name, info.norad).into_boxed_str());
+                // Unnamed user satellite: take the name in the elements.
+                let name = e.object_name.clone().unwrap_or_else(|| info.norad.to_string());
+                info.short = Box::leak(catalog::short_label(&name, info.norad).into_boxed_str());
+                info.name = Box::leak(name.into_boxed_str());
             }
-            Sat::new(info, r.elements()?)
+            Sat::new(info, e.clone())
         })
         .collect()
 }
@@ -298,8 +308,8 @@ impl App {
         let (catalog, catalog_error) = catalog::load();
         let (tx, rx) = mpsc::channel();
         let mut app = App {
-            sats: Arc::new(build_sats(&set.raw, &catalog)),
-            tle_raw: set.raw.clone(),
+            sats: Arc::new(build_sats(&set.elements, &catalog)),
+            tle_raw: set.elements.clone(),
             catalog,
             tle_fetch: None,
             clouds: None,
@@ -333,6 +343,7 @@ impl App {
             status: None,
             prompt: None,
             picker: None,
+            group_menu: None,
             search: None,
             help: false,
             marker,
@@ -618,7 +629,7 @@ impl App {
 
     /// Downloads elements only for catalog satellites that have none.
     fn fetch_missing(&mut self) {
-        let have: HashSet<u64> = self.tle_raw.iter().filter_map(Raw::norad).collect();
+        let have: HashSet<u64> = self.tle_raw.iter().map(|e| e.norad_id).collect();
         let missing: Vec<u64> = self.catalog.iter().map(|s| s.norad).filter(|id| !have.contains(id)).collect();
         if missing.is_empty() || self.refreshing || self.settings.offline {
             return;
@@ -645,9 +656,45 @@ impl App {
         self.fetch_missing();
     }
 
+    /// Shows these built-in groups ("all" for every one) and saves the choice.
+    pub fn set_groups(&mut self, groups: &[String]) -> Result<(), String> {
+        let groups: Vec<String> = if groups.iter().any(|g| g == "all") {
+            catalog::GROUPS.iter().map(|g| g.id.to_string()).collect()
+        } else {
+            groups.to_vec()
+        };
+        if let Some(bad) = groups.iter().find(|g| !catalog::GROUPS.iter().any(|k| k.id == g.as_str())) {
+            let known: Vec<&str> = catalog::GROUPS.iter().map(|g| g.id).collect();
+            return Err(format!("unknown group \"{bad}\"; groups are {}", known.join(", ")));
+        }
+        catalog::set_groups(groups)?;
+        self.reload_catalog();
+        self.set_status(format!("{} satellites in the selected groups", self.sats.len()));
+        Ok(())
+    }
+
+    fn open_group_menu(&mut self) {
+        match catalog::read_user() {
+            Ok(file) => {
+                let enabled = file.enabled_groups();
+                self.group_menu = Some(GroupMenu { choice: 0, initial: enabled.clone(), enabled });
+            }
+            Err(e) => self.set_status(e),
+        }
+    }
+
+    fn close_group_menu(&mut self) {
+        if let Some(menu) = self.group_menu.take()
+            && menu.enabled != menu.initial
+            && let Err(e) = self.set_groups(&menu.enabled)
+        {
+            self.set_status(e);
+        }
+    }
+
     fn add_satellite(&mut self, input: &str) -> Result<(), String> {
         let sat = catalog::parse_add(input)?;
-        let builtin = catalog::CATALOG.iter().any(|b| b.norad == sat.norad);
+        let builtin = catalog::builtin().iter().any(|b| b.norad == sat.norad);
         let only_id = catalog::UserSat { norad: sat.norad, ..Default::default() } == sat;
         if builtin && only_id {
             // A bare id of a built-in mission brings it back.
@@ -691,12 +738,9 @@ impl App {
         let Some(fetch) = &mut self.tle_fetch else { return };
         fetch.pending = fetch.pending.saturating_sub(1);
         if let Ok(text) = &body {
-            for r in tle::parse(text) {
-                if let Some(id) = r.norad()
-                    && wanted.contains(&id)
-                    && !fetch.found.iter().any(|f| f.norad() == Some(id))
-                {
-                    fetch.found.push(r);
+            for e in tle::parse(text) {
+                if wanted.contains(&e.norad_id) && !fetch.found.iter().any(|f| f.norad_id == e.norad_id) {
+                    fetch.found.push(e);
                 }
             }
         }
@@ -704,7 +748,7 @@ impl App {
             return;
         }
         if !fetch.by_id {
-            let have: HashSet<u64> = fetch.found.iter().filter_map(Raw::norad).collect();
+            let have: HashSet<u64> = fetch.found.iter().map(|e| e.norad_id).collect();
             let missing: Vec<u64> = self.catalog.iter().map(|s| s.norad).filter(|id| !have.contains(id)).collect();
             if !missing.is_empty() {
                 fetch.by_id = true;
@@ -727,7 +771,7 @@ impl App {
     }
 
     fn install(&mut self, set: TleSet) {
-        let sats = build_sats(&set.raw, &self.catalog);
+        let sats = build_sats(&set.elements, &self.catalog);
         let n = sats.len();
         if n == 0 {
             return;
@@ -736,7 +780,7 @@ impl App {
         self.forecast = None;
         self.selected_event = None;
         self.sats = Arc::new(sats);
-        self.tle_raw = set.raw;
+        self.tle_raw = set.elements;
         self.select_sat(self.selected.min(n - 1));
         self.tle_source = set.source;
         self.tle_fetched = set.fetched;
@@ -937,6 +981,23 @@ impl App {
             self.quit = true;
             return;
         }
+        if let Some(menu) = &mut self.group_menu {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('g' | 'q') => self.close_group_menu(),
+                KeyCode::Up | KeyCode::Char('k') => menu.choice = menu.choice.saturating_sub(1),
+                KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => menu.choice = (menu.choice + 1).min(catalog::GROUPS.len() - 1),
+                KeyCode::Char(' ' | 'x') => {
+                    let id = catalog::GROUPS[menu.choice].id.to_string();
+                    if let Some(i) = menu.enabled.iter().position(|g| *g == id) {
+                        menu.enabled.remove(i);
+                    } else {
+                        menu.enabled.push(id);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
         if let Some(picker) = &mut self.picker {
             match key.code {
                 KeyCode::Esc => self.picker = None,
@@ -1089,6 +1150,7 @@ impl App {
                 self.prompt = Some(Prompt { kind: PromptKind::Aoi, text });
             }
             KeyCode::Char('x') => self.export(),
+            KeyCode::Char('g') => self.open_group_menu(),
             KeyCode::Char('P') => self.fetch_plans(),
             KeyCode::Char('i') => self.prompt = Some(Prompt { kind: PromptKind::AddSatellite, text: String::new() }),
             KeyCode::Char('D') => self.remove_selected(),

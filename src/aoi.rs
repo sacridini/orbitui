@@ -71,17 +71,10 @@ impl Area {
         in_rings(&self.rings, lat, lon)
     }
 
-    /// Share of the area inside the swath of a satellite at (lat, lon)
-    /// flying along `heading`, with swath edges `near..far` km.
-    pub fn coverage(&self, lat: f64, lon: f64, heading: f64, near: f64, far: f64) -> f64 {
-        let covered = self
-            .samples
-            .iter()
-            .filter(|&&(plat, plon)| {
-                let x = cross_track_km(lat, lon, heading, plat, plon);
-                x >= near && x <= far
-            })
-            .count();
+    /// Share of the area a satellite at (lat, lon) flying along `heading`
+    /// covers, given whether it covers a signed cross-track distance (km).
+    pub fn coverage(&self, lat: f64, lon: f64, heading: f64, covers: impl Fn(f64) -> bool) -> f64 {
+        let covered = self.samples.iter().filter(|&&(plat, plon)| covers(cross_track_km(lat, lon, heading, plat, plon))).count();
         covered as f64 / self.samples.len() as f64
     }
 
@@ -218,10 +211,11 @@ mod tests {
         let Shape::Area(area) = parse_geojson(SQUARE).unwrap().0 else { panic!() };
         // Southbound track along 47.5°W: a 290 km swath covers the whole box,
         // a 54 km one about half of it, and one offset 300 km to the right none.
-        assert!(area.coverage(-15.5, -47.5, 180.0, -145.0, 145.0) > 0.99);
-        let half = area.coverage(-15.5, -47.5, 180.0, -27.0, 27.0);
+        let swath = |near: f64, far: f64| move |x: f64| x >= near && x <= far;
+        assert!(area.coverage(-15.5, -47.5, 180.0, swath(-145.0, 145.0)) > 0.99);
+        let half = area.coverage(-15.5, -47.5, 180.0, swath(-27.0, 27.0));
         assert!((half - 0.5).abs() < 0.1, "{half}");
-        assert_eq!(area.coverage(-15.5, -47.5, 180.0, 300.0, 600.0), 0.0);
+        assert_eq!(area.coverage(-15.5, -47.5, 180.0, swath(300.0, 600.0)), 0.0);
         // Heading south, the east is on the left.
         assert!(cross_track_km(-15.5, -47.5, 180.0, -15.5, -47.0) < 0.0);
     }

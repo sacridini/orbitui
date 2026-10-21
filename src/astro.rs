@@ -168,6 +168,31 @@ pub fn coverage_angle(alt_km: f64, min_el: f64) -> f64 {
     (MEAN_RADIUS_KM * el.cos() / (MEAN_RADIUS_KM + alt_km)).acos() - el
 }
 
+/// Ground distance (km) from nadir to where a satellite at `alt_km` looks
+/// `off_nadir` degrees away from straight down (capped at the horizon).
+pub fn ground_range_off_nadir(alt_km: f64, off_nadir: f64) -> f64 {
+    let r = MEAN_RADIUS_KM;
+    let eta = off_nadir.to_radians();
+    let s = ((r + alt_km) / r * eta.sin()).min(1.0);
+    (s.asin() - eta) * r
+}
+
+/// Ground distance (km) from nadir to the point seen at `incidence` degrees
+/// (the angle from the local vertical at the ground) from `alt_km`.
+pub fn ground_range_incidence(alt_km: f64, incidence: f64) -> f64 {
+    let r = MEAN_RADIUS_KM;
+    let theta = incidence.to_radians();
+    let eta = (r / (r + alt_km) * theta.sin()).asin();
+    (theta - eta) * r
+}
+
+/// Mean altitude (km) of an orbit making `revs_per_day` revolutions a day.
+pub fn altitude_from_mean_motion(revs_per_day: f64) -> f64 {
+    const MU: f64 = 398_600.441_8;
+    let n = revs_per_day * std::f64::consts::TAU / 86_400.0;
+    (MU / (n * n)).cbrt() - MEAN_RADIUS_KM
+}
+
 /// Off-nadir look angle (degrees) from a satellite at `alt_km` to a ground
 /// point `angle` radians away from its nadir.
 pub fn off_nadir(alt_km: f64, angle: f64) -> f64 {
@@ -212,6 +237,20 @@ mod tests {
         let look = look_angles(10.0, 20.0, obs, target);
         assert!(look.el > 89.9);
         assert!((look.range_km - 700.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ground_ranges_invert_each_other() {
+        // A 30° off-nadir look from 643 km lands ~370 km away…
+        let d = ground_range_off_nadir(643.0, 30.0);
+        assert!((d - 375.0).abs() < 15.0, "{d}");
+        // …where off_nadir() gives the angle back.
+        assert!((off_nadir(643.0, d / MEAN_RADIUS_KM) - 30.0).abs() < 1e-6);
+        // Incidence exceeds the off-nadir angle by the Earth-centre angle.
+        let g = ground_range_incidence(693.0, 29.1);
+        assert!((g - 343.0).abs() < 5.0, "{g}");
+        // Sentinel-2: 14.31 rev/day is ~796 km above the mean radius.
+        assert!((altitude_from_mean_motion(14.308) - 796.0).abs() < 5.0);
     }
 
     #[test]

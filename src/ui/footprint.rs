@@ -25,6 +25,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App, theme: &Theme, sat: usize, t
         (side * astro::central_angle(a.geo.lat, a.geo.lon, obs.lat, obs.lon) * astro::MEAN_RADIUS_KM, b.ascending)
     });
     let subtitle = match cross {
+        Some((x, _)) if info.covers(x) && info.tasked() => format!(" · AOI {:.0} km {} of track · within tasking reach", x.abs(), side_word(x)),
         Some((x, _)) if info.covers(x) => format!(" · AOI {:.0} km {} of track · inside swath", x.abs(), side_word(x)),
         Some((x, _)) => format!(" · AOI {:.0} km {} of track", x.abs(), side_word(x)),
         None => String::new(),
@@ -81,9 +82,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &App, theme: &Theme, sat: usize, t
         // Hatched swath: rungs between the edges, ~3 units apart.
         let rung_km = 3.0 / k;
         let stride = (rung_km / 13.6).ceil().max(1.0) as usize;
-        for (a, b) in edges[0].iter().zip(&edges[1]).step_by(stride) {
-            let (pa, pb) = (to(*a), to(*b));
-            plane.line(ctx, pa.0, pa.1, pb.0, pb.1, theme.swath);
+        for (near, far) in [(&edges[0], &edges[1]), (&edges[2], &edges[3])] {
+            for (a, b) in near.iter().zip(far).step_by(stride) {
+                let (pa, pb) = (to(*a), to(*b));
+                plane.line(ctx, pa.0, pa.1, pb.0, pb.1, theme.swath);
+            }
         }
         ctx.layer();
 

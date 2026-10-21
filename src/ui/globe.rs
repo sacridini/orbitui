@@ -17,7 +17,7 @@ struct Scene {
     subsolar: (f64, f64),
     past: Vec<(f64, f64)>,
     future: Vec<(f64, f64)>,
-    edges: [Vec<(f64, f64)>; 2],
+    edges: [Vec<(f64, f64)>; 4],
     footprint: Vec<(f64, f64)>,
 }
 
@@ -30,7 +30,7 @@ impl Scene {
             subsolar,
             past: Vec::new(),
             future: Vec::new(),
-            edges: [Vec::new(), Vec::new()],
+            edges: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             footprint: Vec::new(),
         };
         if let Some(sat) = app.sat() {
@@ -50,8 +50,8 @@ impl Scene {
 }
 
 /// Swath edges along a ground track, offset across track.
-pub fn swath_edges(track: &[(f64, f64)], info: &SatInfo) -> [Vec<(f64, f64)>; 2] {
-    let mut edges = [Vec::new(), Vec::new()];
+pub fn swath_edges(track: &[(f64, f64)], info: &SatInfo) -> [Vec<(f64, f64)>; 4] {
+    let mut edges = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
     if !info.images() {
         return edges;
     }
@@ -61,6 +61,12 @@ pub fn swath_edges(track: &[(f64, f64)], info: &SatInfo) -> [Vec<(f64, f64)>; 2]
         for (edge, x) in edges.iter_mut().zip([info.near_km, info.far_km]) {
             let side = if x >= 0.0 { 90.0 } else { -90.0 };
             edge.push(astro::destination(lat, lon, heading + side, x.abs() / MEAN_RADIUS_KM));
+        }
+        // Radars looking both ways: the mirrored band as two more edges.
+        if info.both_sides {
+            for (edge, x) in edges.iter_mut().skip(2).zip([info.near_km, info.far_km]) {
+                edge.push(astro::destination(lat, lon, heading - 90.0, x.abs() / MEAN_RADIUS_KM));
+            }
         }
     }
     edges

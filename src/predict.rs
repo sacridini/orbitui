@@ -53,7 +53,7 @@ impl Acquisition {
     pub fn usable(&self, kind: Kind) -> bool {
         match kind {
             Kind::Optical => self.sun_el > 0.0,
-            Kind::Sar => true,
+            Kind::Sar | Kind::Lidar => true,
             Kind::Station => false,
         }
     }
@@ -221,7 +221,7 @@ fn acquisition(i: usize, sat: &Sat, obs: &Observer, t: DateTime<Utc>) -> Option<
     let side = if (to_aoi - track).rem_euclid(360.0) < 180.0 { 1.0 } else { -1.0 };
     let cross_km = side * angle * MEAN_RADIUS_KM;
     let coverage = match &obs.area {
-        Some(area) => area.coverage(st.geo.lat, st.geo.lon, track, sat.info.near_km, sat.info.far_km),
+        Some(area) => area.coverage(st.geo.lat, st.geo.lon, track, |x| sat.info.covers(x)),
         None => f64::from(u8::from(sat.info.covers(cross_km))),
     };
     if coverage <= 0.0 {
@@ -319,17 +319,17 @@ mod tests {
     /// Reference culminations computed with Skyfield 1.55 from the same TLEs.
     #[test]
     fn passes_match_skyfield() {
-        use crate::catalog::CATALOG;
+        use crate::catalog::builtin;
         use chrono::TimeZone;
         let sat = |info, l1: &str, l2: &str| Sat::new(info, sgp4::Elements::from_tle(None, l1.as_bytes(), l2.as_bytes()).unwrap()).unwrap();
         let sats = [
             sat(
-                CATALOG[3],
+                builtin().into_iter().find(|s| s.short == "L8").unwrap(),
                 "1 39084U 13008A   26293.96521410  .00000274  00000+0  70848-4 0  9999",
                 "2 39084  98.2176   2.5182 0001284  93.9991 266.1354 14.57118128716214",
             ),
             sat(
-                CATALOG[18],
+                builtin().into_iter().find(|s| s.short == "ISS").unwrap(),
                 "1 25544U 98067A   26293.66080995  .00008635  00000+0  16489-3 0  9997",
                 "2 25544  51.6326  39.1774 0006750 287.9320  72.0932 15.48959761591200",
             ),

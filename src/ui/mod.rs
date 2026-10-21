@@ -137,6 +137,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.picker.is_some() {
         draw_picker(f, app, &theme);
     }
+    if app.group_menu.is_some() {
+        draw_groups(f, app, &theme);
+    }
 }
 
 fn draw_header(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
@@ -201,7 +204,7 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         return;
     }
     let view = match app.view {
-        View::Monitor => vec![("tab", "agenda"), ("↑↓", "satellite")],
+        View::Monitor => vec![("tab", "agenda"), ("↑↓", "satellite"), ("g", "groups")],
         View::Agenda => vec![("tab", "monitor"), ("↑↓", "event"), ("v", "images/passes"), ("x", "export")],
     };
     let mut common = vec![("[ ]", "time warp"), ("space", "pause"), ("0", "now"), ("e", "AOI"), ("u", "UTC"), ("r", "TLE"), ("?", "help")];
@@ -214,7 +217,7 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
 fn draw_monitor(f: &mut Frame, area: Rect, app: &mut App, theme: &Theme) {
     let [globe_area, side] = Layout::horizontal([Constraint::Percentage(63), Constraint::Fill(1)]).areas(area);
-    let [list, details] = Layout::vertical([Constraint::Fill(1), Constraint::Length(11)]).areas(side);
+    let [list, details] = Layout::vertical([Constraint::Fill(1), Constraint::Length(12)]).areas(side);
     globe::render(f, globe_area, app, theme);
     draw_sat_table(f, list, app, theme);
     draw_sat_details(f, details, app, theme);
@@ -292,7 +295,7 @@ fn draw_sat_details(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             format!(
                 "  {} · {} · NORAD {}{}",
                 info.sensor,
-                if info.images() { format!("swath {:.0} km", info.swath_km) } else { "no imager".into() },
+                if info.images() { format!("{} km swath", info.swath_km) } else { "no imager".into() },
                 info.norad,
                 if info.user { " · yours" } else { "" }
             ),
@@ -317,6 +320,9 @@ fn draw_sat_details(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             seen.push(Span::styled("  ▲ above horizon", Style::new().fg(theme.good)));
         }
         lines.push(Line::from(seen));
+    }
+    if info.images() {
+        lines.push(Line::from(kv("coverage", info.access(), theme)));
     }
     lines.push(Line::from(kv(
         "orbit",
@@ -520,7 +526,11 @@ fn draw_events(f: &mut Frame, area: Rect, app: &mut App, theme: &Theme) {
                             Cell::from(if a.ascending { "↑" } else { "↓" }),
                             Cell::from(format!("{:>4.0} {}", a.cross_km.abs(), if a.cross_km >= 0.0 { "R" } else { "L" })),
                             Cell::from(format!("{:>4.1}°", a.off_nadir)),
-                            Cell::from(if kind == Kind::Sar { Span::styled("SAR", Style::new().fg(theme.dim)) } else { light_span(a.light(), a.sun_el, theme) }),
+                            Cell::from(match kind {
+                                Kind::Sar => Span::styled("SAR", Style::new().fg(theme.dim)),
+                                Kind::Lidar if a.light() == Light::Night => Span::styled("lidar", Style::new().fg(theme.dim)),
+                                _ => light_span(a.light(), a.sun_el, theme),
+                            }),
                         ];
                         if app.observer.area.is_some() {
                             cells.push(Cell::from(coverage_span(a.coverage, theme)));
@@ -630,6 +640,7 @@ fn draw_event_info(f: &mut Frame, area: Rect, app: &App, theme: &Theme, ev: &Sel
     if let Some(light) = ev.light {
         let verdict = match (info.kind, light) {
             (Kind::Sar, _) => Span::styled("✓ radar images day and night", Style::new().fg(theme.good)),
+            (Kind::Lidar, _) => Span::styled("✓ lidar works day and night (not through clouds)", Style::new().fg(theme.good)),
             (_, Light::Day) => Span::styled("✓ daylight acquisition", Style::new().fg(theme.good)),
             (_, Light::Low) => Span::styled("! low sun", Style::new().fg(theme.warn)),
             (_, Light::Night) => Span::styled("✗ night: optical sensor idle", Style::new().fg(theme.bad)),
@@ -682,6 +693,36 @@ fn draw_input(f: &mut Frame, app: &App, theme: &Theme) {
     f.render_widget(Paragraph::new(lines).block(panel(title.into(), app, theme)), area);
 }
 
+fn draw_groups(f: &mut Frame, app: &App, theme: &Theme) {
+    let Some(menu) = &app.group_menu else { return };
+    let builtin = crate::catalog::builtin();
+    let mut lines: Vec<Line> = crate::catalog::GROUPS
+        .iter()
+        .enumerate()
+        .map(|(i, g)| {
+            let on = menu.enabled.iter().any(|e| e == g.id);
+            let count = builtin.iter().filter(|s| s.groups.contains(&g.id)).count();
+            let selected = i == menu.choice;
+            let style = if selected { Style::new().fg(theme.text).bg(theme.faint).add_modifier(Modifier::BOLD) } else { Style::new().fg(theme.text) };
+            Line::from(vec![
+                Span::styled(if selected { "▸ " } else { "  " }, Style::new().fg(theme.accent)),
+                Span::styled(if on { "[x] " } else { "[ ] " }, Style::new().fg(if on { theme.good } else { theme.dim })),
+                Span::styled(format!("{:<46}", g.name), style),
+                Span::styled(format!("{count:>3} satellites"), Style::new().fg(theme.dim)),
+            ])
+        })
+        .collect();
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "  A satellite in several groups shows when any of them is on.",
+        Style::new().fg(theme.dim),
+    )));
+    lines.push(hint_line(&[("↑↓", "move"), ("space", "switch"), ("enter", "apply")], theme));
+    let area = centered(f.area(), 74.min(f.area().width), (lines.len() as u16 + 2).min(f.area().height));
+    f.render_widget(Clear, area);
+    f.render_widget(Paragraph::new(lines).block(panel("satellite groups".into(), app, theme)), area);
+}
+
 fn draw_picker(f: &mut Frame, app: &App, theme: &Theme) {
     let Some(picker) = &app.picker else { return };
     let height = (picker.places.len() as u16 + 4).min(f.area().height);
@@ -732,6 +773,7 @@ fn draw_help(f: &mut Frame, app: &App, theme: &Theme) {
         ("z", "timeline span 12 / 24 / 48 / 72 h"),
         ("u", "local time / UTC"),
         ("e", "set the area of interest (a place name works)"),
+        ("g", "choose satellite groups (SAR, China, VHR…)"),
         ("i", "add a satellite by NORAD id"),
         ("x", "export the agenda as CSV and iCalendar"),
         ("P", "download ESA acquisition plans (Sentinel-1/2)"),

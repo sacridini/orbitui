@@ -2,7 +2,8 @@
 //!
 //! The URL can set the area of interest and the opening screen, so that a
 //! forecast can be shared: `?lat=-3.10&lon=-60.02&name=Manaus&view=agenda`
-//! (also `place=Berlim`, `map=1`, `days=7` and `geojson=<url>`). GeoJSON files dropped on
+//! (also `place=Berlim`, `map=1`, `days=7`, `geojson=<url>` and
+//! `groups=sar,china`). GeoJSON files dropped on
 //! the page become the area of interest; ESA plan KML files are loaded.
 
 use orbitui::app::{App, KeyCode, KeyEvent, Settings, View};
@@ -33,6 +34,12 @@ fn main() {
         app.view = View::Agenda;
     }
     app.globe.flat = param(&params, "map").is_some_and(|v| v == "1");
+    if let Some(groups) = param(&params, "groups") {
+        let groups: Vec<String> = groups.split(',').map(|g| g.trim().to_string()).collect();
+        if let Err(e) = app.set_groups(&groups) {
+            app.set_status(e);
+        }
+    }
     if let Some(url) = param(&params, "geojson") {
         app.fetch_geojson(url);
     } else if let Some(name) = param(&params, "place") {

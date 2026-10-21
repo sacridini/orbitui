@@ -58,6 +58,10 @@ struct Cli {
     /// Download fresh elements into the cache, print a summary and exit
     #[arg(long, conflicts_with = "offline")]
     fetch: bool,
+    /// Satellite groups to show, comma separated, or "all" (saved):
+    /// copernicus, landsat, cbers, modis-viirs, hyperspectral, sar, china, vhr, ocean, india, stations
+    #[arg(long, value_delimiter = ',')]
+    groups: Option<Vec<String>>,
     /// Load an ESA acquisition plan (KML); repeat for several
     #[arg(long, value_name = "FILE")]
     plan: Vec<String>,
@@ -129,6 +133,9 @@ fn main() -> Result<()> {
     let settings = Settings { days: cli.days, min_el: cli.min_elev, offline };
     let mut app = App::new(observer, settings, marker, compat);
     app.globe.flat = cli.map;
+    if let Some(groups) = &cli.groups {
+        app.set_groups(groups).map_err(anyhow::Error::msg)?;
+    }
     if let Some(name) = &cli.place {
         let before = app.observer.coords();
         app.search_place(name, true);

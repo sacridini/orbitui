@@ -24,8 +24,9 @@ pub struct SatState {
 }
 
 impl Sat {
-    pub fn new(info: SatInfo, elements: Elements) -> Option<Self> {
+    pub fn new(mut info: SatInfo, elements: Elements) -> Option<Self> {
         let constants = Constants::from_elements(&elements).ok()?;
+        info.resolve(astro::altitude_from_mean_motion(elements.mean_motion));
         Some(Sat { info, elements, constants })
     }
 
@@ -115,7 +116,7 @@ pub fn format_coords(lat: f64, lon: f64) -> String {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::catalog::CATALOG;
+    use crate::catalog::builtin;
 
     pub fn sentinel_2a() -> Sat {
         let elements = Elements::from_tle(
@@ -124,7 +125,7 @@ pub(crate) mod tests {
             b"2 40697  98.5632   6.9617 0001081  96.5011 263.6296 14.30823655591716",
         )
         .unwrap();
-        Sat::new(CATALOG[0], elements).unwrap()
+        Sat::new(builtin()[0], elements).unwrap()
     }
 
     #[test]
