@@ -4,6 +4,7 @@ use crate::aoi::{self, Shape};
 use crate::catalog::{self, SatInfo};
 use crate::clouds::{self, Clouds};
 use crate::coast::World;
+use crate::export;
 use crate::config;
 use crate::orbit::{Observer, Sat};
 use crate::platform;
@@ -364,6 +365,47 @@ impl App {
         for group in tle::GROUPS {
             self.get(tle::group_url(group), Msg::Tle);
         }
+    }
+
+    /// Upcoming imaging opportunities under the agenda's filters.
+    pub fn upcoming_acquisitions(&self) -> Vec<&Acquisition> {
+        let Some(fc) = &self.forecast else { return Vec::new() };
+        let now = self.clock.now();
+        fc.acquisitions
+            .iter()
+            .filter(|a| a.time >= now && (!self.only_selected || a.sat == self.selected))
+            .filter(|a| self.show_night || a.usable(self.sats[a.sat].info.kind))
+            .collect()
+    }
+
+    /// Writes (or downloads, in the browser) the agenda as CSV and iCalendar.
+    pub fn export(&mut self) {
+        if self.forecast.is_none() {
+            self.set_status("The forecast is still being computed");
+            return;
+        }
+        let acquisitions = self.upcoming_acquisitions();
+        let n = acquisitions.len();
+        let files = [
+            (export::file_name(self, "csv"), export::csv(self, &acquisitions)),
+            (export::file_name(self, "ics"), export::ics(self, &acquisitions)),
+        ];
+        let mut written = Vec::new();
+        for (name, content) in files {
+            match platform::deliver(&name, &content) {
+                Ok(path) => written.push(path),
+                Err(e) => {
+                    self.set_status(format!("Export failed: {e}"));
+                    return;
+                }
+            }
+        }
+        self.set_status(format!("{n} opportunities exported to {}{}", written.join(" and "), platform::delivery_place()));
+    }
+
+    /// Whether the mission plans the acquisition, when a plan is loaded.
+    pub fn plan_label(&self, _a: &Acquisition) -> String {
+        String::new()
     }
 
     /// Downloads are in flight.
@@ -820,6 +862,7 @@ impl App {
                 let text = format!("{:.4}, {:.4} {}", self.observer.lat, self.observer.lon, self.observer.name);
                 self.prompt = Some(Prompt { kind: PromptKind::Aoi, text });
             }
+            KeyCode::Char('x') => self.export(),
             KeyCode::Char('i') => self.prompt = Some(Prompt { kind: PromptKind::AddSatellite, text: String::new() }),
             KeyCode::Char('D') => self.remove_selected(),
             KeyCode::Char('r') => {

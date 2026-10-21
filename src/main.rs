@@ -55,6 +55,12 @@ struct Cli {
     /// Download fresh elements into the cache, print a summary and exit
     #[arg(long, conflicts_with = "offline")]
     fetch: bool,
+    /// Write the imaging opportunities as CSV to this file ("-" for stdout) and exit
+    #[arg(long, value_name = "FILE")]
+    csv: Option<String>,
+    /// Write the imaging opportunities as iCalendar to this file ("-" for stdout) and exit
+    #[arg(long, value_name = "FILE")]
+    ics: Option<String>,
     /// Print the forecast (UTC) as text and exit
     #[arg(long)]
     list: bool,
@@ -128,6 +134,22 @@ fn main() -> Result<()> {
 
     if cli.fetch {
         return fetch(app);
+    }
+    if cli.csv.is_some() || cli.ics.is_some() {
+        settle(&mut app);
+        app.forecast_now();
+        let acquisitions = app.upcoming_acquisitions();
+        for (target, content) in [
+            (&cli.csv, cli.csv.as_ref().map(|_| orbitui::export::csv(&app, &acquisitions))),
+            (&cli.ics, cli.ics.as_ref().map(|_| orbitui::export::ics(&app, &acquisitions))),
+        ] {
+            match (target.as_deref(), content) {
+                (Some("-"), Some(text)) => print!("{text}"),
+                (Some(path), Some(text)) => std::fs::write(path, text).with_context(|| path.to_string())?,
+                _ => {}
+            }
+        }
+        return Ok(());
     }
     if cli.list {
         settle(&mut app);

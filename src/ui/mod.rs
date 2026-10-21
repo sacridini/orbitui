@@ -198,7 +198,7 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     }
     let view = match app.view {
         View::Monitor => vec![("tab", "agenda"), ("↑↓", "satellite")],
-        View::Agenda => vec![("tab", "monitor"), ("↑↓", "event"), ("v", "images/passes")],
+        View::Agenda => vec![("tab", "monitor"), ("↑↓", "event"), ("v", "images/passes"), ("x", "export")],
     };
     let mut common = vec![("[ ]", "time warp"), ("space", "pause"), ("0", "now"), ("e", "AOI"), ("u", "UTC"), ("r", "TLE"), ("?", "help")];
     if crate::platform::THREADS {
@@ -666,6 +666,7 @@ fn draw_help(f: &mut Frame, app: &App, theme: &Theme) {
         ("u", "local time / UTC"),
         ("e", "set the area of interest"),
         ("i", "add a satellite by NORAD id"),
+        ("x", "export the agenda as CSV and iCalendar"),
         ("D", "remove the selected satellite"),
         ("r", "download fresh elements"),
         ("q  esc", "quit"),

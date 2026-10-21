@@ -51,7 +51,14 @@ orbitui --time 2027-01-15T12:00:00Z            # plan for another date
 orbitui --list --days 7                        # print the forecast and exit
 orbitui --fetch                                # refresh orbital elements and exit
 orbitui --aoi parcel.geojson                   # a polygon as area of interest
+orbitui --csv agenda.csv --ics agenda.ics      # export the agenda and exit
 ```
+
+`x` exports the agenda from inside the app: a CSV for spreadsheets and
+scripts, and an iCalendar file whose events (one minute around each
+overflight, with its geometry, Sun and clouds) import into any calendar.
+The terminal writes both to the working directory; the web page downloads
+them. Both follow the agenda's filters (`n`, `f`).
 
 ### Areas as polygons
 
@@ -81,6 +88,7 @@ Press `e` inside the app to change the area of interest and `?` for all keys.
 | `u` | local time / UTC |
 | `e` | set the area of interest |
 | `i` / `D` | add a satellite / remove the selected one |
+| `x` | export the agenda as CSV and iCalendar |
 | `r` | download fresh elements |
 
 ### Terminals
@@ -183,5 +191,4 @@ color = "#ff8800"       # or a colour name
 ## Ideas
 
 - mission acquisition plans (Sentinel-2/1 KML, Landsat WRS-2)
-- export the agenda to iCalendar or CSV
 - mouse: drag to rotate, click to select

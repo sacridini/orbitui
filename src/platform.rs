@@ -54,7 +54,12 @@ mod imp {
     /// Writes a file for the user in the working directory.
     pub fn deliver(name: &str, content: &str) -> Result<String, String> {
         std::fs::write(name, content).map_err(|e| format!("{name}: {e}"))?;
-        Ok(std::fs::canonicalize(name).map(|p| p.display().to_string()).unwrap_or_else(|_| name.into()))
+        Ok(name.into())
+    }
+
+    /// Where `deliver` puts files.
+    pub fn delivery_place() -> String {
+        std::env::current_dir().map(|d| format!(" in {}", d.display())).unwrap_or_default()
     }
 }
 
@@ -120,6 +125,11 @@ mod imp {
         anchor.set_download(name);
         anchor.click();
         Url::revoke_object_url(&url).ok();
-        Ok(format!("{name} (download)"))
+        Ok(name.into())
+    }
+
+    /// Where `deliver` puts files.
+    pub fn delivery_place() -> String {
+        " as downloads".into()
     }
 }
