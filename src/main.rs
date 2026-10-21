@@ -103,6 +103,12 @@ fn legacy_console() -> bool {
 }
 
 fn main() -> Result<()> {
+    // Like other command-line tools, end quietly when a pipe closes
+    // (`orbitui --list | head`) instead of failing to print.
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
     let cli = Cli::parse();
     if !(1.0..=14.0).contains(&cli.days) {
         bail!("--days must be between 1 and 14");
@@ -307,8 +313,7 @@ fn print_forecast(app: &mut App) {
     let Some(fc) = &app.forecast else { return };
     let now = app.clock.now();
     println!("# {} ({}), from {} UTC", app.observer.name, app.observer.coords(), now.format("%Y-%m-%d %H:%M"));
-    println!("
-# imaging opportunities");
+    println!("\n# imaging opportunities");
     println!(
         "{:<12} {:<19} {:>4} {:>9} {:>8} {:>6} {:>6} {:>6}  plan",
         "satellite", "time_utc", "dir", "xtrack_km", "offnadir", "sun_el", "cover", "cloud"
@@ -331,8 +336,7 @@ fn print_forecast(app: &mut App) {
             app.plan_label(a)
         );
     }
-    println!("
-# passes");
+    println!("\n# passes");
     println!("{:<12} {:<19} {:<8} {:<8} {:>6}", "satellite", "aos_utc", "tca", "los", "max_el");
     for p in fc.passes.iter().filter(|p| p.los >= now) {
         println!(

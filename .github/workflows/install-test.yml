@@ -16,7 +16,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - run: curl -fsSL https://sacridini.github.io/orbitui/install.sh | sh
-      - run: orbitui --version && orbitui --offline --list --days 1 | head -5
+      - run: orbitui --version && orbitui --offline --list --days 1 > forecast.txt && head -5 forecast.txt
 
   apt:
     strategy:
@@ -31,7 +31,7 @@ jobs:
           curl -fsSLo /usr/share/keyrings/orbitui.gpg https://sacridini.github.io/orbitui/apt/orbitui.gpg
           curl -fsSLo /etc/apt/sources.list.d/orbitui.sources https://sacridini.github.io/orbitui/apt/orbitui.sources
           apt-get update && apt-get install -y orbitui
-          orbitui --version && orbitui --offline --list --days 1 | head -5
+          orbitui --version && orbitui --offline --list --days 1 > forecast.txt && head -5 forecast.txt
 
   homebrew:
     strategy:
