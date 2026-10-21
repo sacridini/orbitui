@@ -8,7 +8,7 @@ const SNAPSHOT: &str = include_str!("../assets/tle_snapshot.txt");
 const GP_URL: &str = "https://celestrak.org/NORAD/elements/gp.php";
 /// Celestrak groups holding most of the catalog; the rest is fetched by id.
 pub const GROUPS: [&str; 3] = ["resource", "weather", "stations"];
-const CACHE_KEY: &str = "cache.tle";
+const CACHE_KEY: &str = "cache/tle.txt";
 const FETCHED_PREFIX: &str = "# fetched ";
 /// Celestrak updates elements every few hours and asks clients not to poll
 /// more often than that.

@@ -3,7 +3,7 @@
 use crate::orbit::Observer;
 use crate::platform;
 
-const KEY: &str = "aoi";
+const KEY: &str = "aoi.txt";
 
 /// Brasília, until the user picks an area.
 pub fn default_observer() -> Observer {

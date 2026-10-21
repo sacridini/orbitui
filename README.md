@@ -68,6 +68,7 @@ Press `e` inside the app to change the area of interest and `?` for all keys.
 | `z` | timeline span 12 / 24 / 48 / 72 h |
 | `u` | local time / UTC |
 | `e` | set the area of interest |
+| `i` / `D` | add a satellite / remove the selected one |
 | `r` | download fresh elements |
 
 ### Terminals
@@ -111,7 +112,40 @@ schedule, Sentinel-1 alternates modes) and on clouds.
 | Suomi NPP, NOAA-20/21 | VIIRS | 3060 km |
 | ISS | (tracked only) | |
 
-The list lives in `src/catalog.rs`.
+### Your own satellites
+
+Press `i` and type a NORAD id, optionally followed by the swath (a width in km,
+or `near..far` edges, positive to the right of the track), the kind (`optical`,
+`sar` or `station`) and a name:
+
+```text
+41240 0 Jason-3
+57320 120 optical
+39634 340..620 sar My radar
+```
+
+`D` removes the selected satellite (a built-in one is hidden; type its id
+with `i` to bring it back). Elements of new satellites are downloaded by id.
+
+The list is kept in `satellites.toml`, in the config directory
+(`%APPDATA%\orbitui\config` on Windows, `~/.config/orbitui` on Linux,
+`~/Library/Application Support/orbitui` on macOS) or in the browser's storage,
+and can be edited by hand:
+
+```toml
+builtin = true          # keep the built-in missions (default)
+exclude = [25544]       # built-in missions to hide, by NORAD id
+
+[[satellite]]
+norad = 57320           # the only required field
+name = "My EO sat"      # default: the name in the TLE
+sensor = "PAN"
+swath_km = 120          # nadir-centred swath; 0 tracks without imaging
+near_km = 250           # or explicit edges, positive right of the track
+far_km = 480
+kind = "optical"        # optical | sar | station
+color = "#ff8800"       # or a colour name
+```
 
 ## Layout
 
@@ -132,7 +166,6 @@ The list lives in `src/catalog.rs`.
 ## Ideas
 
 - AOI as a polygon (GeoJSON/KML) instead of a point
-- user-defined satellites and sensors in a config file
 - mission acquisition plans (Sentinel-2/1 KML, Landsat WRS-2)
 - cloud cover forecast on the timeline
 - export the agenda to iCalendar or CSV

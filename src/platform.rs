@@ -1,8 +1,8 @@
 //! What differs between the terminal and the browser: network, storage and
 //! handing files to the user.
 //!
-//! Keys of the store starting with `cache.` hold data that can be fetched
-//! again; the others hold the user's settings.
+//! Keys of the store are file names; those under `cache/` hold data that can
+//! be fetched again, the others the user's settings.
 
 pub use imp::*;
 
@@ -29,9 +29,9 @@ mod imp {
 
     pub fn location(key: &str) -> Option<PathBuf> {
         let dirs = directories::ProjectDirs::from("", "", "orbitui")?;
-        Some(match key.strip_prefix("cache.") {
-            Some(name) => dirs.cache_dir().join(format!("{name}.txt")),
-            None => dirs.config_dir().join(format!("{key}.txt")),
+        Some(match key.strip_prefix("cache/") {
+            Some(name) => dirs.cache_dir().join(name),
+            None => dirs.config_dir().join(key),
         })
     }
 

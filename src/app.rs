@@ -46,6 +46,18 @@ pub struct KeyEvent {
     pub ctrl: bool,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PromptKind {
+    Aoi,
+    AddSatellite,
+}
+
+/// A line of text being typed by the user.
+pub struct Prompt {
+    pub kind: PromptKind,
+    pub text: String,
+}
+
 /// A download of elements: the Celestrak groups first, then the satellites
 /// they lacked, one by one.
 struct TleFetch {
@@ -204,11 +216,13 @@ pub struct App {
     pub computing: bool,
     pub catalog: Vec<SatInfo>,
     tle_fetch: Option<TleFetch>,
+    /// The elements in use, to rebuild the fleet when the catalog changes.
+    tle_raw: Vec<Raw>,
     pub tle_source: Source,
     pub tle_fetched: Option<DateTime<Utc>>,
     pub refreshing: bool,
     status: Option<(String, Instant)>,
-    pub input: Option<String>,
+    pub prompt: Option<Prompt>,
     pub help: bool,
     pub marker: Marker,
     pub compat: bool,
@@ -219,12 +233,18 @@ pub struct App {
     pub quit: bool,
 }
 
-fn build_sats(set: &TleSet, catalog: &[SatInfo]) -> Vec<Sat> {
+fn build_sats(raw: &[Raw], catalog: &[SatInfo]) -> Vec<Sat> {
     catalog
         .iter()
         .filter_map(|info| {
-            let raw = set.raw.iter().find(|r| r.norad() == Some(info.norad))?;
-            Sat::new(*info, raw.elements()?)
+            let r = raw.iter().find(|r| r.norad() == Some(info.norad))?;
+            let mut info = *info;
+            if info.name.is_empty() {
+                // Unnamed user satellite: take the TLE's name.
+                info.name = Box::leak(r.name.clone().into_boxed_str());
+                info.short = Box::leak(catalog::short_label(&r.name, info.norad).into_boxed_str());
+            }
+            Sat::new(info, r.elements()?)
         })
         .collect()
 }
@@ -232,10 +252,11 @@ fn build_sats(set: &TleSet, catalog: &[SatInfo]) -> Vec<Sat> {
 impl App {
     pub fn new(observer: Observer, settings: Settings, marker: Marker, compat: bool) -> Self {
         let set = tle::load_local();
-        let catalog = catalog::builtin();
+        let (catalog, catalog_error) = catalog::load();
         let (tx, rx) = mpsc::channel();
         let mut app = App {
-            sats: Arc::new(build_sats(&set, &catalog)),
+            sats: Arc::new(build_sats(&set.raw, &catalog)),
+            tle_raw: set.raw.clone(),
             catalog,
             tle_fetch: None,
             slices: None,
@@ -262,7 +283,7 @@ impl App {
             tle_fetched: set.fetched,
             refreshing: false,
             status: None,
-            input: None,
+            prompt: None,
             help: false,
             marker,
             compat,
@@ -272,8 +293,13 @@ impl App {
             last_tick: Instant::now(),
             quit: false,
         };
+        if let Some(e) = catalog_error {
+            app.set_status(e);
+        }
         if set.is_stale() && !app.settings.offline {
             app.refresh_tle();
+        } else {
+            app.fetch_missing();
         }
         app
     }
@@ -329,6 +355,68 @@ impl App {
         }
     }
 
+    /// Downloads elements only for catalog satellites that have none.
+    fn fetch_missing(&mut self) {
+        let have: HashSet<u64> = self.tle_raw.iter().filter_map(Raw::norad).collect();
+        let missing: Vec<u64> = self.catalog.iter().map(|s| s.norad).filter(|id| !have.contains(id)).collect();
+        if missing.is_empty() || self.refreshing || self.settings.offline {
+            return;
+        }
+        self.refreshing = true;
+        self.tle_fetch = Some(TleFetch { pending: missing.len(), by_id: true, found: self.tle_raw.clone() });
+        for id in missing {
+            self.get(tle::catnr_url(id), Msg::Tle);
+        }
+    }
+
+    /// Re-reads the catalog after the user changed it.
+    fn reload_catalog(&mut self) {
+        let (catalog, error) = catalog::load();
+        self.catalog = catalog;
+        self.forecast = None;
+        self.selected_event = None;
+        self.sats = Arc::new(build_sats(&self.tle_raw, &self.catalog));
+        self.select_sat(self.selected.min(self.sats.len().saturating_sub(1)));
+        self.request_forecast();
+        if let Some(e) = error {
+            self.set_status(e);
+        }
+        self.fetch_missing();
+    }
+
+    fn add_satellite(&mut self, input: &str) -> Result<(), String> {
+        let sat = catalog::parse_add(input)?;
+        let builtin = catalog::CATALOG.iter().any(|b| b.norad == sat.norad);
+        let only_id = catalog::UserSat { norad: sat.norad, ..Default::default() } == sat;
+        if builtin && only_id {
+            // A bare id of a built-in mission brings it back.
+            let mut file = catalog::read_user()?;
+            file.exclude.retain(|&id| id != sat.norad);
+            file.satellites.retain(|s| s.norad != sat.norad);
+            catalog::write_user(&file);
+        } else {
+            catalog::add_user(sat.clone())?;
+        }
+        self.reload_catalog();
+        if let Some(i) = self.sats.iter().position(|s| s.info.norad == sat.norad) {
+            self.select_sat(i);
+        }
+        self.set_status(format!("Satellite {} added to {}", sat.norad, catalog::USER_KEY));
+        Ok(())
+    }
+
+    fn remove_selected(&mut self) {
+        let Some(sat) = self.sat() else { return };
+        let (norad, name) = (sat.info.norad, sat.info.name);
+        match catalog::remove(norad) {
+            Ok(()) => {
+                self.reload_catalog();
+                self.set_status(format!("{name} removed; press i and type {norad} to bring it back"));
+            }
+            Err(e) => self.set_status(e),
+        }
+    }
+
     fn get(&self, url: String, wrap: fn(Result<String, String>) -> Msg) {
         let tx = self.tx.clone();
         platform::get(url, move |body| {
@@ -378,7 +466,7 @@ impl App {
     }
 
     fn install(&mut self, set: TleSet) {
-        let sats = build_sats(&set, &self.catalog);
+        let sats = build_sats(&set.raw, &self.catalog);
         let n = sats.len();
         if n == 0 {
             return;
@@ -387,6 +475,7 @@ impl App {
         self.forecast = None;
         self.selected_event = None;
         self.sats = Arc::new(sats);
+        self.tle_raw = set.raw;
         self.select_sat(self.selected.min(n - 1));
         self.tle_source = set.source;
         self.tle_fetched = set.fetched;
@@ -525,20 +614,30 @@ impl App {
             self.quit = true;
             return;
         }
-        if let Some(input) = &mut self.input {
+        if let Some(prompt) = &mut self.prompt {
             match key.code {
-                KeyCode::Esc => self.input = None,
-                KeyCode::Enter => match config::parse_aoi(input) {
-                    Some((lat, lon, name)) => {
-                        self.input = None;
-                        self.set_observer(Observer::new(name, lat, lon, 0.0));
+                KeyCode::Esc => self.prompt = None,
+                KeyCode::Enter => {
+                    let (kind, text) = (prompt.kind, prompt.text.clone());
+                    let result = match kind {
+                        PromptKind::Aoi => match config::parse_aoi(&text) {
+                            Some((lat, lon, name)) => {
+                                self.set_observer(Observer::new(name, lat, lon, 0.0));
+                                Ok(())
+                            }
+                            None => Err("Expected: lat, lon [name]  e.g.  -3.10, -60.02 Manaus".to_string()),
+                        },
+                        PromptKind::AddSatellite => self.add_satellite(&text),
+                    };
+                    match result {
+                        Ok(()) => self.prompt = None,
+                        Err(e) => self.set_status(e),
                     }
-                    None => self.set_status("Expected: lat, lon [name]  e.g.  -3.10, -60.02 Manaus"),
-                },
-                KeyCode::Backspace => {
-                    input.pop();
                 }
-                KeyCode::Char(c) => input.push(c),
+                KeyCode::Backspace => {
+                    prompt.text.pop();
+                }
+                KeyCode::Char(c) => prompt.text.push(c),
                 _ => {}
             }
             return;
@@ -638,8 +737,11 @@ impl App {
                 }
             }
             KeyCode::Char('e') => {
-                self.input = Some(format!("{:.4}, {:.4} {}", self.observer.lat, self.observer.lon, self.observer.name));
+                let text = format!("{:.4}, {:.4} {}", self.observer.lat, self.observer.lon, self.observer.name);
+                self.prompt = Some(Prompt { kind: PromptKind::Aoi, text });
             }
+            KeyCode::Char('i') => self.prompt = Some(Prompt { kind: PromptKind::AddSatellite, text: String::new() }),
+            KeyCode::Char('D') => self.remove_selected(),
             KeyCode::Char('r') => {
                 let recent = self
                     .tle_fetched

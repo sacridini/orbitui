@@ -70,6 +70,9 @@ struct Cli {
     /// Screen for --render: monitor or agenda
     #[arg(long, hide = true, default_value = "monitor")]
     view: String,
+    /// Keys typed before --render draws (\n enter, \e esc, \d down, \u up)
+    #[arg(long, hide = true, default_value = "")]
+    keys: String,
 }
 
 /// The classic Windows console host lacks braille glyphs in its fonts.
@@ -123,7 +126,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if let Some(size) = &cli.render {
-        return render_once(app, size, &cli.view);
+        return render_once(app, size, &cli.view, &cli.keys);
     }
 
     let terminal = ratatui::init();
@@ -192,16 +195,32 @@ fn fetch(mut app: App) -> Result<()> {
             None => println!("{:<12} missing", info.name),
         }
     }
-    if let Some(path) = platform::location("cache.tle") {
+    if let Some(path) = platform::location("cache/tle.txt") {
         println!("saved to {}", path.display());
     }
     Ok(())
 }
 
-fn render_once(mut app: App, size: &str, view: &str) -> Result<()> {
+fn render_once(mut app: App, size: &str, view: &str, keys: &str) -> Result<()> {
     let (w, h) = size.split_once('x').context("--render expects WIDTHxHEIGHT")?;
     let (w, h): (u16, u16) = (w.parse()?, h.parse()?);
     app.view = if view == "agenda" { View::Agenda } else { View::Monitor };
+    app.forecast_now();
+    let mut chars = keys.chars();
+    while let Some(c) = chars.next() {
+        let code = match c {
+            '\\' => match chars.next() {
+                Some('n') => KeyCode::Enter,
+                Some('e') => KeyCode::Esc,
+                Some('d') => KeyCode::Down,
+                Some('u') => KeyCode::Up,
+                _ => continue,
+            },
+            c => KeyCode::Char(c),
+        };
+        app.on_key(KeyEvent { code, ctrl: false });
+        app.tick();
+    }
     app.forecast_now();
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h))?;
     terminal.draw(|f| ui::draw(f, &mut app))?;

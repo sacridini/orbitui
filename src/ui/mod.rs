@@ -6,7 +6,7 @@ mod globe;
 mod sky;
 mod timeline;
 
-use crate::app::{App, Event, EventList, View};
+use crate::app::{App, Event, EventList, PromptKind, View};
 use crate::catalog::Kind;
 use crate::orbit::format_coords;
 use crate::predict::Light;
@@ -128,7 +128,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.help {
         draw_help(f, app, &theme);
     }
-    if app.input.is_some() {
+    if app.prompt.is_some() {
         draw_input(f, app, &theme);
     }
 }
@@ -278,10 +278,11 @@ fn draw_sat_details(f: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         Span::styled(info.name, Style::new().fg(info.color).add_modifier(Modifier::BOLD)),
         Span::styled(
             format!(
-                "  {} · {} · NORAD {}",
+                "  {} · {} · NORAD {}{}",
                 info.sensor,
                 if info.images() { format!("swath {:.0} km", info.swath_km) } else { "no imager".into() },
-                info.norad
+                info.norad,
+                if info.user { " · yours" } else { "" }
             ),
             Style::new().fg(theme.dim),
         ),
@@ -566,21 +567,30 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
 }
 
 fn draw_input(f: &mut Frame, app: &App, theme: &Theme) {
-    let area = centered(f.area(), 64.min(f.area().width), 7);
-    let input = app.input.as_deref().unwrap_or_default();
+    let Some(prompt) = &app.prompt else { return };
+    let (title, help, example) = match prompt.kind {
+        PromptKind::Aoi => ("area of interest", "Latitude, longitude and an optional name", "-3.10, -60.02 Manaus"),
+        PromptKind::AddSatellite => (
+            "add satellite",
+            "NORAD id, then optional swath (km or near..far), kind and name",
+            "41240 0 Jason-3   ·   57320 120 optical   ·   39634 340..620 sar",
+        ),
+    };
+    let area = centered(f.area(), 76.min(f.area().width), 8);
     let lines = vec![
-        Line::from(Span::styled("Latitude, longitude and an optional name", Style::new().fg(theme.dim))),
+        Line::from(Span::styled(help, Style::new().fg(theme.text))),
+        Line::from(Span::styled(format!("e.g. {example}"), Style::new().fg(theme.dim))),
         Line::raw(""),
         Line::from(vec![
             Span::styled("› ", Style::new().fg(theme.accent)),
-            Span::styled(input.to_string(), Style::new().fg(theme.text).add_modifier(Modifier::BOLD)),
+            Span::styled(prompt.text.clone(), Style::new().fg(theme.text).add_modifier(Modifier::BOLD)),
             Span::styled("█", Style::new().fg(theme.accent)),
         ]),
         Line::raw(""),
         hint_line(&[("enter", "apply"), ("esc", "cancel")], theme),
     ];
     f.render_widget(Clear, area);
-    f.render_widget(Paragraph::new(lines).block(panel("area of interest".into(), app, theme)), area);
+    f.render_widget(Paragraph::new(lines).block(panel(title.into(), app, theme)), area);
 }
 
 fn draw_help(f: &mut Frame, app: &App, theme: &Theme) {
@@ -604,6 +614,8 @@ fn draw_help(f: &mut Frame, app: &App, theme: &Theme) {
         ("z", "timeline span 12 / 24 / 48 / 72 h"),
         ("u", "local time / UTC"),
         ("e", "set the area of interest"),
+        ("i", "add a satellite by NORAD id"),
+        ("D", "remove the selected satellite"),
         ("r", "download fresh elements"),
         ("q  esc", "quit"),
     ];
