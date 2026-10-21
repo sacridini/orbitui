@@ -5,7 +5,7 @@ resolver = "3"
 
 [package]
 name = "orbitui"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Terminal planner of Earth observation satellite overpasses and imaging opportunities"
 license = "MIT"
@@ -58,6 +58,27 @@ web-sys = { version = "0.3", features = [
     "Url",
     "Window",
 ] }
+
+[package.metadata.deb]
+maintainer = "Eduardo Lacerda <eduardolacerdageo@gmail.com>"
+copyright = "2026, Eduardo Lacerda"
+license-file = ["LICENSE", "0"]
+extended-description = """Plans Earth observation satellite overpasses from the terminal: when Sentinel, Landsat, CBERS, EnMAP, NISAR and other missions image an area of interest, with the viewing geometry, the Sun, clouds and ESA acquisition plans, on an ASCII globe."""
+section = "science"
+priority = "optional"
+# Static (musl) binaries: no shared libraries to depend on.
+depends = ""
+assets = [
+    ["target/release/orbitui", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/orbitui/README.md", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/orbitui", dest = "/usr/bin/orbitui", mode = "755" },
+    { source = "README.md", dest = "/usr/share/doc/orbitui/README.md", mode = "644", doc = true },
+    { source = "LICENSE", dest = "/usr/share/licenses/orbitui/LICENSE", mode = "644", doc = true },
+]
 
 # Propagation runs ~10^6 times per forecast: keep debug builds usable.
 [profile.dev]

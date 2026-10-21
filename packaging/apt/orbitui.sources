@@ -1,0 +1,5 @@
+Types: deb
+URIs: https://sacridini.github.io/orbitui/apt
+Suites: stable
+Components: main
+Signed-By: /usr/share/keyrings/orbitui.gpg

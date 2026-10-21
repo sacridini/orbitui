@@ -1,7 +1,5 @@
 <p align="center"><img src="assets/logo.svg" alt="orbitui" width="560"></p>
 
-<h1 align="center">orbitui</h1>
-
 **When will a satellite image my area?** `orbitui` is a terminal planner of Earth
 observation overpasses. It propagates the orbits of Sentinel, Landsat, CBERS,
 MODIS, VIIRS and other missions, and tells you when your area of interest falls
@@ -33,9 +31,38 @@ whole repeat cycle unfold.
 
 ## Install
 
+**Linux and macOS**, any distribution:
+
 ```sh
-cargo install --git https://github.com/sacridini/orbitui
+curl -fsSL https://sacridini.github.io/orbitui/install.sh | sh
 ```
+
+The script picks the build for your system and processor, checks its
+SHA-256 and installs it in `/usr/local/bin` (or `~/.local/bin`).
+
+**Homebrew** (macOS and Linux):
+
+```sh
+brew install sacridini/tap/orbitui
+```
+
+**Debian, Ubuntu and derivatives**, from the signed APT repository (once),
+then updates come with `apt upgrade`:
+
+```sh
+sudo curl -fsSLo /usr/share/keyrings/orbitui.gpg https://sacridini.github.io/orbitui/apt/orbitui.gpg
+sudo curl -fsSLo /etc/apt/sources.list.d/orbitui.sources https://sacridini.github.io/orbitui/apt/orbitui.sources
+sudo apt update && sudo apt install orbitui
+```
+
+**Fedora, openSUSE, Windows**: the `.rpm` and the Windows `.zip` are on the
+[releases page](https://github.com/sacridini/orbitui/releases), next to the
+`.deb` and the plain binaries. **From source**:
+`cargo install --git https://github.com/sacridini/orbitui`.
+
+The APT repository is signed with key
+`7CF9 FC0A 83EF 15E8 46AD E48D 9F4D 415D 842D BF3B`
+([`packaging/apt/orbitui.asc`](packaging/apt/orbitui.asc)).
 
 Or open the web version, the same app compiled to WebAssembly:
 <https://sacridini.github.io/orbitui/>. The URL takes the area of interest

@@ -29,6 +29,13 @@ jobs:
       - name: Build
         working-directory: web
         run: trunk build --release --public-url /orbitui/
+      - name: Installer and APT repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+        run: |
+          cp packaging/install.sh web/dist/install.sh
+          sh packaging/apt/build.sh web/dist/apt
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/dist

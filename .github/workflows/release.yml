@@ -1,0 +1,138 @@
+name: release
+
+# A tag vX.Y.Z builds and publishes a release: binaries for Linux, macOS and
+# Windows, .deb and .rpm packages, checksums and the installer; then updates
+# the Homebrew tap and rebuilds the Pages site (which carries the APT
+# repository). Run by hand, it only builds and keeps the files as artifacts.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, linux: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm, linux: true }
+          - { target: x86_64-apple-darwin, os: macos-latest }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: musl tools
+        if: matrix.linux
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build
+        run: cargo build --release --locked -p orbitui --target ${{ matrix.target }}
+      - name: Archive
+        shell: bash
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          name="orbitui-$version-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp README.md LICENSE "dist/$name/"
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            cp "target/${{ matrix.target }}/release/orbitui.exe" "dist/$name/"
+            (cd dist && 7z a -bd "$name.zip" "$name" > /dev/null)
+          else
+            cp "target/${{ matrix.target }}/release/orbitui" "dist/$name/"
+            tar -czf "dist/$name.tar.gz" -C dist "$name"
+          fi
+          rm -rf "dist/$name"
+          "target/${{ matrix.target }}/release/orbitui" --version || true
+      - name: Linux packages
+        if: matrix.linux
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb,cargo-generate-rpm
+      - name: .deb and .rpm
+        if: matrix.linux
+        run: |
+          cargo deb --no-build --no-strip -p orbitui --target ${{ matrix.target }} --output dist/
+          cargo generate-rpm -p . --target ${{ matrix.target }} --output dist/
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums and installer
+        run: |
+          cp packaging/install.sh dist/
+          (cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+      - name: Release notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '$0 ~ "^## \\[?"v"\\]?" {on=1; next} on && /^## / {exit} on' CHANGELOG.md > notes.md
+          cat notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body_path: notes.md
+      - name: Rebuild the Pages site (APT repository)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main
+
+  homebrew:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Formula
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          sed "s/@VERSION@/$version/g" packaging/homebrew/orbitui.rb.in > orbitui.rb
+          for t in aarch64-apple-darwin x86_64-apple-darwin aarch64-unknown-linux-musl x86_64-unknown-linux-musl; do
+            sum=$(sha256sum "dist/orbitui-$version-$t.tar.gz" | cut -d' ' -f1)
+            sed -i "s/@SHA_$t@/$sum/" orbitui.rb
+          done
+          if grep -q '@[A-Za-z0-9_-]*@' orbitui.rb; then echo "unreplaced placeholder"; exit 1; fi
+          cat orbitui.rb
+      - name: Push to sacridini/homebrew-tap
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$TAP_DEPLOY_KEY" > ~/.ssh/tap
+          chmod 600 ~/.ssh/tap
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap -o StrictHostKeyChecking=accept-new"
+          git clone git@github.com:sacridini/homebrew-tap.git tap
+          mkdir -p tap/Formula
+          cp orbitui.rb tap/Formula/orbitui.rb
+          cd tap
+          git config user.name "Eduardo Lacerda"
+          git config user.email "eduardolacerdageo@gmail.com"
+          git add Formula/orbitui.rb
+          git commit -m "orbitui ${GITHUB_REF_NAME#v}"
+          git push origin HEAD:main
