@@ -11,6 +11,7 @@
 //! dropped on the page.
 
 use crate::aoi;
+use crate::orbit::Observer;
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use quick_xml::Reader;
 use quick_xml::events::Event;
@@ -63,7 +64,18 @@ pub enum Status {
     Unknown,
 }
 
-#[derive(Default)]
+impl Status {
+    /// "planned IW", "not planned", or nothing without a plan.
+    pub fn label(&self) -> String {
+        match self {
+            Status::Planned(mode) => format!("planned {mode}").trim_end().to_string(),
+            Status::NotPlanned => "not planned".into(),
+            Status::Unknown => String::new(),
+        }
+    }
+}
+
+#[derive(Clone, Default)]
 pub struct Plans {
     pub files: Vec<PlanFile>,
 }
@@ -92,6 +104,14 @@ impl Plans {
             .filter(|s| s.recording && s.begin - slack <= t && t <= s.end + slack)
             .find(|s| points.iter().any(|&p| s.contains(p)))
             .map_or(Status::NotPlanned, |s| Status::Planned(s.mode.clone()))
+    }
+
+    /// `status` over the area of interest (its samples, or its point).
+    pub fn status_for(&self, sat: &str, t: DateTime<Utc>, obs: &Observer) -> Status {
+        match &obs.area {
+            Some(area) => self.status(sat, t, &area.samples),
+            None => self.status(sat, t, &[(obs.lat, obs.lon)]),
+        }
     }
 
     /// Satellites whose loaded plans cover `[from, to]` entirely.

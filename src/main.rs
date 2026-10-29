@@ -171,9 +171,10 @@ fn main() -> Result<()> {
         settle(&mut app);
         app.forecast_now();
         let acquisitions = app.upcoming_acquisitions();
+        let sheet = app.sheet();
         for (target, content) in [
-            (&cli.csv, cli.csv.as_ref().map(|_| orbitui::export::csv(&app, &acquisitions))),
-            (&cli.ics, cli.ics.as_ref().map(|_| orbitui::export::ics(&app, &acquisitions))),
+            (&cli.csv, cli.csv.as_ref().map(|_| orbitui::export::csv(&sheet, &acquisitions))),
+            (&cli.ics, cli.ics.as_ref().map(|_| orbitui::export::ics(&sheet, &acquisitions))),
         ] {
             match (target.as_deref(), content) {
                 (Some("-"), Some(text)) => print!("{text}"),

@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 
 pub const USER_KEY: &str = "satellites.toml";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Kind {
     /// Passive optical sensor: images only when the target is sunlit.
     Optical,
@@ -43,7 +43,7 @@ pub enum Kind {
     Station,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {
     Right,
     Left,
@@ -51,7 +51,7 @@ pub enum Side {
 }
 
 /// How a sensor's ground coverage follows from the satellite's altitude.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Geometry {
     /// Edges given in km (nadir-centred swaths, explicit edges).
     Edges,

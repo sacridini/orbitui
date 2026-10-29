@@ -7,6 +7,7 @@ use crate::astro::{self, MEAN_RADIUS_KM};
 use crate::catalog::Kind;
 use crate::orbit::{Observer, Sat};
 use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// Grid step in seconds (~140 km of ground track for a LEO satellite).
@@ -14,7 +15,7 @@ const STEP_S: f64 = 20.0;
 const TOLERANCE_S: f64 = 0.5;
 
 /// The AOI falls inside the sensor swath on this overflight.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Acquisition {
     pub sat: usize,
     /// Time of closest approach.
@@ -60,7 +61,7 @@ impl Acquisition {
 }
 
 /// The satellite is above the AOI's horizon.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Pass {
     pub sat: usize,
     pub aos: DateTime<Utc>,
@@ -71,7 +72,7 @@ pub struct Pass {
     pub los_az: f64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Forecast {
     pub acquisitions: Vec<Acquisition>,
     pub passes: Vec<Pass>,

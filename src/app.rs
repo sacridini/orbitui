@@ -443,9 +443,10 @@ impl App {
         }
         let acquisitions = self.upcoming_acquisitions();
         let n = acquisitions.len();
+        let sheet = self.sheet();
         let files = [
-            (export::file_name(self, "csv"), export::csv(self, &acquisitions)),
-            (export::file_name(self, "ics"), export::ics(self, &acquisitions)),
+            (export::file_name(&sheet, "csv"), export::csv(&sheet, &acquisitions)),
+            (export::file_name(&sheet, "ics"), export::ics(&sheet, &acquisitions)),
         ];
         let mut written = Vec::new();
         for (name, content) in files {
@@ -462,10 +463,18 @@ impl App {
 
     /// Whether the mission plans the acquisition, when a plan is loaded.
     pub fn plan_label(&self, a: &Acquisition) -> String {
-        match self.plan_status(a) {
-            plan::Status::Planned(mode) => format!("planned {mode}").trim_end().to_string(),
-            plan::Status::NotPlanned => "not planned".into(),
-            plan::Status::Unknown => String::new(),
+        self.plan_status(a).label()
+    }
+
+    /// What exports describe besides the opportunities.
+    pub fn sheet(&self) -> export::Sheet<'_> {
+        export::Sheet {
+            app: "orbitui",
+            sats: &self.sats,
+            observer: &self.observer,
+            clouds: self.clouds.as_ref(),
+            plans: &self.plans,
+            now: self.clock.now(),
         }
     }
 
@@ -599,11 +608,7 @@ impl App {
 
     /// The plan's verdict on an acquisition.
     pub fn plan_status(&self, a: &Acquisition) -> plan::Status {
-        let sat = self.sats[a.sat].info.short;
-        match &self.observer.area {
-            Some(area) => self.plans.status(sat, a.time, &area.samples),
-            None => self.plans.status(sat, a.time, &[(self.observer.lat, self.observer.lon)]),
-        }
+        self.plans.status_for(self.sats[a.sat].info.short, a.time, &self.observer)
     }
 
     /// Keeps the cloud forecast for the AOI current.
