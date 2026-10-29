@@ -285,7 +285,8 @@ pub struct App {
     pub quit: bool,
 }
 
-fn build_sats(elements: &[Elements], catalog: &[SatInfo]) -> Vec<Sat> {
+/// The catalog's satellites that have elements, ready to propagate.
+pub fn build_sats(elements: &[Elements], catalog: &[SatInfo]) -> Vec<Sat> {
     catalog
         .iter()
         .filter_map(|info| {

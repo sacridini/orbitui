@@ -144,6 +144,11 @@ impl Job {
         })
     }
 
+    /// Share of the satellites scanned so far.
+    pub fn progress(&self) -> f64 {
+        self.next as f64 / self.sats.len().max(1) as f64
+    }
+
     pub fn run(mut self) -> Forecast {
         loop {
             if let Some(fc) = self.step(web_time::Duration::MAX) {
